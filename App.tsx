@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import DataUploader from './components/DataUploader';
 import TemplateSelector from './components/TemplateSelector';
 import ReportWorkspace from './components/ReportWorkspace';
@@ -12,6 +12,7 @@ const App: React.FC = () => {
   const [excelData, setExcelData] = useState<ExcelData | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<Template | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const scrollTimeoutRef = useRef<number | null>(null);
 
   // Load templates persistence
   useEffect(() => {
@@ -28,6 +29,26 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('smartdoc_templates', JSON.stringify(templates));
   }, [templates]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      document.body.classList.add('is-scrolling');
+      if (scrollTimeoutRef.current) {
+        window.clearTimeout(scrollTimeoutRef.current);
+      }
+      scrollTimeoutRef.current = window.setTimeout(() => {
+        document.body.classList.remove('is-scrolling');
+      }, 800);
+    };
+
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      if (scrollTimeoutRef.current) {
+        window.clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Workflow Handlers
   const handleDataLoaded = (data: ExcelData) => {

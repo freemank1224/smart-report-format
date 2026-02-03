@@ -65,18 +65,18 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             word-wrap: break-word;
         }
         .markdown-body h1 {
-            padding-bottom: 0.3em;
+            padding-bottom: 0;
             font-size: 2em;
-            border-bottom: 1px solid #eaecef;
+            border-bottom: none;
             margin-top: 24px;
             margin-bottom: 16px;
             font-weight: 600;
             line-height: 1.25;
         }
         .markdown-body h2 {
-            padding-bottom: 0.3em;
+            padding-bottom: 0;
             font-size: 1.5em;
-            border-bottom: 1px solid #eaecef;
+            border-bottom: none;
             margin-top: 24px;
             margin-bottom: 16px;
             font-weight: 600;
@@ -169,13 +169,96 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             box-sizing: content-box;
             background-color: #fff;
         }
+        .markdown-body h1:nth-of-type(-n+3) {
+            text-align: center;
+            margin-top: 0;
+        }
     `;
+
+    const normalizeReportTitle = (content: string) => {
+        const singleLinePattern = /^#\s*\{\{CompanyName\}\}[^\n]*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)[^\n]*$/m;
+        const twoLinePattern = /^#\s*\{\{CompanyName\}\}\s*\n\s*(?:\*\*|__)?\s*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)\s*(?:\*\*|__)?\s*$/m;
+
+        const replacement = (
+            `# {{CompanyName}}\n` +
+            `# Material Safety Data Sheet\n` +
+            `# (MSDS)`
+        );
+
+        if (singleLinePattern.test(content)) {
+            return content.replace(singleLinePattern, replacement);
+        }
+
+        if (twoLinePattern.test(content)) {
+            return content.replace(twoLinePattern, replacement);
+        }
+
+        return content;
+    };
+
+    const normalizeSectionBullets = (content: string) => {
+        const lines = content.split('\n');
+        let inSection = false;
+        let inCodeBlock = false;
+
+        const normalized = lines.map(line => {
+            const trimmed = line.trim();
+
+            if (trimmed.startsWith('```')) {
+                inCodeBlock = !inCodeBlock;
+                return line;
+            }
+
+            if (!inCodeBlock && /^#{1,3}\s+Section\s+\d+/i.test(trimmed)) {
+                inSection = true;
+                return line;
+            }
+
+            if (!inCodeBlock && /^#{1,3}\s+Section\s+\d+/i.test(trimmed) === false && /^#{1,3}\s+/.test(trimmed)) {
+                inSection = false;
+                return line;
+            }
+
+            if (!inCodeBlock && inSection) {
+                if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+                    return line;
+                }
+                return line.replace(/^\s*[-*+]\s+/, '');
+            }
+
+            return line;
+        });
+
+        return normalized.join('\n');
+    };
+
+    const normalizeInlineFields = (content: string) => {
+        // Insert line breaks before inline bold labels on the same line,
+        // but do NOT touch lines inside Markdown tables.
+        const lines = content.split('\n');
+        const normalized = lines.map(line => {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+                return line;
+            }
+            const isListLine = /^([-*+]|\d+\.)\s+/.test(trimmed);
+            const isHeadingLine = /^#{1,6}\s+/.test(trimmed);
+            const isQuoteLine = /^>\s+/.test(trimmed);
+            if (isListLine || isHeadingLine || isQuoteLine) {
+                return line;
+            }
+            return line.replace(/([^\n])\s+(?=\*\*[^*]+?:\*\*)/g, '$1  \n');
+        });
+        return normalized.join('\n');
+    };
 
     const previewHtml = useMemo(() => {
         // @ts-ignore
         if (typeof window.marked === 'undefined') return null;
         // @ts-ignore
-        return window.marked.parse(localContent);
+        window.marked.setOptions({ breaks: true, gfm: true });
+        // @ts-ignore
+        return window.marked.parse(normalizeInlineFields(normalizeSectionBullets(normalizeReportTitle(localContent))));
     }, [localContent]);
 
   // --- Helpers ---
@@ -408,7 +491,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
 
   // Prepare content with all variables (user input + auto-calculated)
   const getProcessedContent = () => {
-      let content = localContent;
+    let content = normalizeInlineFields(normalizeSectionBullets(normalizeReportTitle(localContent)));
       
       // 1. Replace User Variables
       detectedVariables.forEach(v => {
@@ -457,6 +540,8 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             }
 
             // Parse Markdown to HTML
+            // @ts-ignore
+            window.marked.setOptions({ breaks: true, gfm: true });
             // @ts-ignore
             const htmlContent = window.marked.parse(finalContent);
 
@@ -595,7 +680,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                  )}
              </div>
 
-             <div className="flex-1 overflow-auto relative bg-white dark:bg-slate-900">
+             <div className={`flex-1 ${mode === 'edit' ? 'overflow-hidden' : 'overflow-auto'} relative bg-white dark:bg-slate-900`}>
                  {mode === 'edit' ? (
                      <textarea
                         ref={editorRef}

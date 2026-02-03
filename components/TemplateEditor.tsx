@@ -18,6 +18,27 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const normalizeReportTitle = (content: string) => {
+    const singleLinePattern = /^#\s*\{\{CompanyName\}\}[^\n]*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)[^\n]*$/m;
+    const twoLinePattern = /^#\s*\{\{CompanyName\}\}\s*\n\s*(?:\*\*|__)?\s*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)\s*(?:\*\*|__)?\s*$/m;
+
+    const replacement = (
+      `# {{CompanyName}}\n` +
+      `# Material Safety Data Sheet\n` +
+      `# (MSDS)`
+    );
+
+    if (singleLinePattern.test(content)) {
+      return content.replace(singleLinePattern, replacement);
+    }
+
+    if (twoLinePattern.test(content)) {
+      return content.replace(twoLinePattern, replacement);
+    }
+
+    return content;
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -30,7 +51,7 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
       
       // 2. AI Analysis
       const result = await analyzePdfStructure(rawText);
-      setTemplateContent(result.content);
+      setTemplateContent(normalizeReportTitle(result.content));
       
       // Move to editor step
       setStep(2);
