@@ -1,5 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
+import mammoth from 'mammoth';
 import { ExcelData } from '../types';
 
 // Configure PDF worker
@@ -106,4 +107,50 @@ export const parseExcelFile = async (file: File): Promise<ExcelData> => {
     reader.onerror = (err) => reject(err);
     reader.readAsBinaryString(file);
   });
+};
+
+const truncateLines = (lines: string[], maxLines: number) => {
+  if (lines.length <= maxLines) return lines;
+  return [...lines.slice(0, maxLines), `... (${lines.length - maxLines} more lines truncated)`];
+};
+
+export const extractTextFromDocx = async (file: File): Promise<string> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value || '';
+};
+
+export const extractTextFromPlainText = async (file: File): Promise<string> => {
+  return await file.text();
+};
+
+export const extractTextFromSpreadsheet = async (file: File): Promise<string> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array', raw: true });
+  const sheetNames = workbook.SheetNames.slice(0, 1);
+  const lines: string[] = [];
+
+  sheetNames.forEach((sheetName) => {
+    const worksheet = workbook.Sheets[sheetName];
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+    if (jsonData.length === 0) return;
+
+    lines.push(`Sheet: ${sheetName}`);
+    const header = (jsonData[0] || []).map((h: any) => (h ? String(h).trim() : '')).filter(Boolean);
+    const dataRows = jsonData.slice(1);
+
+    const maxRows = Math.min(100, dataRows.length);
+    for (let i = 0; i < maxRows; i++) {
+      const row = dataRows[i] || [];
+      const pairs: string[] = [];
+      for (let c = 0; c < Math.min(header.length, 30); c++) {
+        const key = header[c] || `Column_${c + 1}`;
+        const val = row[c] !== undefined && row[c] !== null ? String(row[c]).trim() : '';
+        if (key && val) pairs.push(`${key}: ${val}`);
+      }
+      if (pairs.length > 0) lines.push(pairs.join(' | '));
+    }
+  });
+
+  return truncateLines(lines, 300).join('\n');
 };

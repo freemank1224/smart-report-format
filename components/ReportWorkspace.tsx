@@ -1,6 +1,8 @@
-import React, { useState, useMemo, useRef } from 'react';
-import { Template, ExcelData } from '../types';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Template, ExcelData, DocumentMappingResult } from '../types';
 import { ArrowLeft, Download, Search, Edit3, Eye, Save, Table as TableIcon, ChevronUp, ChevronDown, CheckSquare, Plus, Settings, RefreshCw, Link as LinkIcon, FileText, X, Check, Wand2, FileType } from 'lucide-react';
+import { extractTextFromPdf, extractTextFromDocx, extractTextFromPlainText, extractTextFromSpreadsheet } from '../utils/fileProcessors';
+import { suggestVariableMappingsFromDocument } from '../services/geminiService';
 
 interface ReportWorkspaceProps {
   template: Template;
@@ -49,6 +51,13 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
   const [detectedVariables, setDetectedVariables] = useState<string[]>([]);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+    const [isAutoMapping, setIsAutoMapping] = useState(false);
+    const [autoMapError, setAutoMapError] = useState<string | null>(null);
+    const [showAutoMapModal, setShowAutoMapModal] = useState(false);
+    const [autoMapSuggestions, setAutoMapSuggestions] = useState<DocumentMappingResult | null>(null);
+    const [autoMapSelections, setAutoMapSelections] = useState<Record<string, string>>({});
+    const autoMapFileRef = useRef<HTMLInputElement>(null);
+    const storageKey = `smartdoc_variable_values_${template.id}`;
 
     // --- Markdown Rendering ---
     const markdownStyles = `
@@ -471,13 +480,34 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
       
       setDetectedVariables(userVars);
       
-      // Initialize values with empty strings
-      const initialValues: Record<string, string> = {};
-      userVars.forEach(v => initialValues[v] = '');
-      setVariableValues(initialValues);
+            // Initialize values with empty strings, but restore from storage if available
+            const initialValues: Record<string, string> = {};
+            userVars.forEach(v => initialValues[v] = '');
+            try {
+                const saved = localStorage.getItem(storageKey);
+                if (saved) {
+                    const parsed = JSON.parse(saved) as Record<string, string>;
+                    userVars.forEach(v => {
+                        if (parsed[v]) initialValues[v] = parsed[v];
+                    });
+                }
+            } catch (e) {
+                console.warn('Failed to restore variable values', e);
+            }
+            setVariableValues(initialValues);
+      setAutoMapError(null);
       
       setShowExportModal(true);
   };
+
+    useEffect(() => {
+        if (!showExportModal) return;
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(variableValues));
+        } catch (e) {
+            console.warn('Failed to persist variable values', e);
+        }
+    }, [variableValues, showExportModal, storageKey]);
 
   const fillNoData = () => {
       const newValues = { ...variableValues };
@@ -488,6 +518,78 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
       });
       setVariableValues(newValues);
   };
+
+    const clearAllValues = () => {
+        const cleared: Record<string, string> = {};
+        detectedVariables.forEach(v => { cleared[v] = ''; });
+        setVariableValues(cleared);
+        try {
+            localStorage.removeItem(storageKey);
+        } catch (e) {
+            console.warn('Failed to clear stored variable values', e);
+        }
+    };
+
+    const extractTextFromAnyDocument = async (file: File): Promise<string> => {
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        if (ext === 'pdf') return await extractTextFromPdf(file);
+        if (ext === 'docx') return await extractTextFromDocx(file);
+        if (ext === 'txt') return await extractTextFromPlainText(file);
+        if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') return await extractTextFromSpreadsheet(file);
+        throw new Error('Unsupported file type.');
+    };
+
+    const handleAutoMapFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (detectedVariables.length === 0) {
+            setAutoMapError('No variables to map.');
+            return;
+        }
+
+        setIsAutoMapping(true);
+        setAutoMapError(null);
+        try {
+            const text = await extractTextFromAnyDocument(file);
+            const result = await suggestVariableMappingsFromDocument({
+                documentText: text,
+                templateContent: localContent,
+                variables: detectedVariables
+            });
+
+            const initialSelections: Record<string, string> = {};
+            result.mappings.forEach(m => {
+                initialSelections[m.variable] = m.candidates?.[0]?.value || '';
+            });
+
+            setAutoMapSelections(initialSelections);
+            setAutoMapSuggestions(result);
+            setShowAutoMapModal(true);
+        } catch (err: any) {
+            setAutoMapError(err.message || 'Failed to analyze document.');
+        } finally {
+            setIsAutoMapping(false);
+            if (autoMapFileRef.current) {
+                autoMapFileRef.current.value = '';
+            }
+        }
+    };
+
+    const applyAutoMapSelections = () => {
+        if (!autoMapSuggestions) return;
+        setVariableValues(prev => {
+            const next = { ...prev };
+            autoMapSuggestions.mappings.forEach(m => {
+                const selected = autoMapSelections[m.variable];
+                if (selected) {
+                    next[m.variable] = selected;
+                }
+            });
+            return next;
+        });
+        setShowAutoMapModal(false);
+    };
 
   // Prepare content with all variables (user input + auto-calculated)
   const getProcessedContent = () => {
@@ -921,6 +1023,11 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                   </div>
                   
                   <div className="flex-1 overflow-auto p-8 bg-slate-50/30 dark:bg-slate-900/30">
+                                            {autoMapError && (
+                                                <div className="mb-4 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 rounded-lg">
+                                                    {autoMapError}
+                                                </div>
+                                            )}
                       {detectedVariables.length === 0 ? (
                           <div className="flex flex-col items-center justify-center h-full text-center text-slate-400">
                               <CheckCircleIcon />
@@ -954,13 +1061,31 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                   </div>
 
                   <div className="px-8 py-5 border-t border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-b-xl flex justify-between items-center shadow-[0_-4px_10px_-4px_rgba(0,0,0,0.05)]">
-                      <button 
-                        onClick={fillNoData}
-                        className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-sm font-semibold px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                      >
-                          <Wand2 size={16} />
-                          Fill empty fields with "No data"
-                      </button>
+                                            <div className="flex items-center gap-3">
+                                                <button 
+                                                    onClick={fillNoData}
+                                                    className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-sm font-semibold px-4 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                >
+                                                        <Wand2 size={16} />
+                                                        Fill empty fields with "No data"
+                                                </button>
+
+                                                <input
+                                                    ref={autoMapFileRef}
+                                                    type="file"
+                                                    accept=".txt,.pdf,.docx,.xlsx,.xls,.csv"
+                                                    className="hidden"
+                                                    onChange={handleAutoMapFileUpload}
+                                                />
+                                                <button
+                                                    onClick={() => autoMapFileRef.current?.click()}
+                                                    className="flex items-center gap-2 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-all bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50"
+                                                    disabled={isAutoMapping}
+                                                >
+                                                    <Wand2 size={16} />
+                                                    {isAutoMapping ? 'Analyzing document...' : 'Auto match from document'}
+                                                </button>
+                                            </div>
 
                       <div className="flex gap-4">
                         <button 
@@ -968,6 +1093,13 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                             className="px-5 py-2.5 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
                         >
                             Cancel
+                        </button>
+
+                        <button 
+                            onClick={clearAllValues}
+                            className="px-5 py-2.5 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                        >
+                            Clear All
                         </button>
                         
                         <button 
@@ -991,6 +1123,80 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
               </div>
           </div>
       )}
+
+            {showAutoMapModal && autoMapSuggestions && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-4xl border border-slate-200 dark:border-slate-700 flex flex-col max-h-[90vh]">
+                        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800 rounded-t-xl">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800 dark:text-white">Review Auto-Match Suggestions</h3>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                                    Please confirm the mappings. You have the final decision.
+                                </p>
+                            </div>
+                            <button onClick={() => setShowAutoMapModal(false)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-auto p-6 bg-slate-50/30 dark:bg-slate-900/30">
+                            {autoMapSuggestions.notes && autoMapSuggestions.notes.length > 0 && (
+                                <div className="mb-4 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 rounded-lg">
+                                    {autoMapSuggestions.notes.join(' ')}
+                                </div>
+                            )}
+
+                            <div className="space-y-4">
+                                {autoMapSuggestions.mappings.map((m) => (
+                                    <div key={m.variable} className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-sm font-bold text-slate-700 dark:text-slate-200">{m.variable}</span>
+                                            <span className="text-xs text-slate-400">Current: {variableValues[m.variable] || 'Empty'}</span>
+                                        </div>
+
+                                        {m.candidates.length === 0 ? (
+                                            <div className="text-sm text-slate-400">No candidates found.</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {m.candidates.map((c, idx) => (
+                                                    <label key={`${m.variable}-${idx}`} className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer">
+                                                        <input
+                                                            type="radio"
+                                                            name={`auto-${m.variable}`}
+                                                            checked={autoMapSelections[m.variable] === c.value}
+                                                            onChange={() => setAutoMapSelections(prev => ({ ...prev, [m.variable]: c.value }))}
+                                                            className="mt-1"
+                                                        />
+                                                        <div className="flex-1">
+                                                            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{c.value}</div>
+                                                            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Evidence: {c.evidence}</div>
+                                                            <div className="text-[10px] text-slate-400 mt-1">Confidence: {Math.round((c.confidence || 0) * 100)}%</div>
+                                                        </div>
+                                                    </label>
+                                                ))}
+                                                <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer">
+                                                    <input
+                                                        type="radio"
+                                                        name={`auto-${m.variable}`}
+                                                        checked={!autoMapSelections[m.variable]}
+                                                        onChange={() => setAutoMapSelections(prev => ({ ...prev, [m.variable]: '' }))}
+                                                    />
+                                                    <span className="text-sm text-slate-500">Keep current value</span>
+                                                </label>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-b-xl flex justify-end gap-3">
+                            <button onClick={() => setShowAutoMapModal(false)} className="px-4 py-2 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">Cancel</button>
+                            <button onClick={applyAutoMapSelections} className="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-lg shadow-blue-500/20 transition-all">Apply Selected</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
     </div>
   );
