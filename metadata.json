@@ -1,0 +1,5 @@
+{
+  "name": "SmartDoc AI Builder",
+  "description": "An AI-powered document automation tool. Extract structures from PDF templates using Gemini, define variables, and batch generate reports using Excel data.",
+  "requestFramePermissions": []
+}
