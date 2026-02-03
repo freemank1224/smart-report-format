@@ -44,11 +44,139 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     headerRenames: {}
   });
 
-  // --- Finalize / Export Config ---
+    // --- Finalize / Export Config ---
   const [showExportModal, setShowExportModal] = useState(false);
   const [detectedVariables, setDetectedVariables] = useState<string[]>([]);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+    // --- Markdown Rendering ---
+    const markdownStyles = `
+        .markdown-body {
+            box-sizing: border-box;
+            min-width: 200px;
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 20mm;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+            font-size: 14px;
+            line-height: 1.7;
+            color: #24292e;
+            word-wrap: break-word;
+        }
+        .markdown-body h1 {
+            padding-bottom: 0.3em;
+            font-size: 2em;
+            border-bottom: 1px solid #eaecef;
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+        .markdown-body h2 {
+            padding-bottom: 0.3em;
+            font-size: 1.5em;
+            border-bottom: 1px solid #eaecef;
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+        .markdown-body h3 {
+            font-size: 1.25em;
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+        .markdown-body h4 {
+            font-size: 1em;
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+        .markdown-body p {
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+        .markdown-body blockquote {
+            padding: 0 1em;
+            color: #6a737d;
+            border-left: 0.25em solid #dfe2e5;
+            margin: 0 0 16px 0;
+        }
+        .markdown-body ul, .markdown-body ol {
+            padding-left: 2em;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+        .markdown-body table {
+            border-spacing: 0;
+            border-collapse: collapse;
+            display: table;
+            width: 100%;
+            max-width: 100%;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+        .markdown-body table tr {
+            background-color: #fff;
+            border-top: 1px solid #c6cbd1;
+        }
+        .markdown-body table tr:nth-child(2n) {
+            background-color: #f6f8fa;
+        }
+        .markdown-body table th, 
+        .markdown-body table td {
+            padding: 6px 13px;
+            border: 1px solid #dfe2e5;
+        }
+        .markdown-body table th {
+            font-weight: 600;
+            background-color: #f6f8fa;
+        }
+        .markdown-body code {
+            padding: 0.2em 0.4em;
+            margin: 0;
+            font-size: 85%;
+            background-color: rgba(27,31,35,0.05);
+            border-radius: 3px;
+            font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+        }
+        .markdown-body pre {
+            padding: 16px;
+            overflow: auto;
+            font-size: 85%;
+            line-height: 1.45;
+            background-color: #f6f8fa;
+            border-radius: 3px;
+            margin-bottom: 16px;
+        }
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .markdown-body hr {
+            height: 0.25em;
+            padding: 0;
+            margin: 24px 0;
+            background-color: #e1e4e8;
+            border: 0;
+        }
+        .markdown-body img {
+            max-width: 100%;
+            box-sizing: content-box;
+            background-color: #fff;
+        }
+    `;
+
+    const previewHtml = useMemo(() => {
+        // @ts-ignore
+        if (typeof window.marked === 'undefined') return null;
+        // @ts-ignore
+        return window.marked.parse(localContent);
+    }, [localContent]);
 
   // --- Helpers ---
 
@@ -316,230 +444,88 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
       setShowExportModal(false);
   };
 
-  const handleExportPDF = async () => {
+    const handleExportPDF = async () => {
       setIsExportingPdf(true);
       const finalContent = getProcessedContent();
 
-      // Check if marked is available
-      // @ts-ignore
-      if (typeof window.marked === 'undefined') {
-        alert('Markdown parser not loaded. Please refresh the page.');
-        setIsExportingPdf(false);
-        return;
-      }
+            // Check if marked is available
+            // @ts-ignore
+            if (typeof window.marked === 'undefined') {
+                alert('Markdown parser not loaded. Please refresh the page.');
+                setIsExportingPdf(false);
+                return;
+            }
 
-      // Parse Markdown to HTML
-      // @ts-ignore
-      const htmlContent = window.marked.parse(finalContent);
+            // Parse Markdown to HTML
+            // @ts-ignore
+            const htmlContent = window.marked.parse(finalContent);
 
-      // Create a dedicated container for PDF generation
-      // FIX: Use 'fixed' position at top-left with a negative z-index but POSITIVE coordinates 
-      // or just hidden behind a backdrop. html2canvas struggles with off-screen (negative coords).
-      // We will put it at 0,0 but behind everything.
-      const element = document.createElement('div');
-      element.id = 'pdf-export-container';
-      
-      // Styling to mimic A4 paper and GitHub Markdown
-      Object.assign(element.style, {
-        position: 'fixed',
-        top: '0',
-        left: '0',
-        zIndex: '-9999', // Behind everything
-        width: '210mm', // A4 width
-        minHeight: '297mm', // A4 height
-        backgroundColor: '#ffffff',
-        color: '#24292e',
-      });
+            // Use a hidden iframe to avoid popup issues and blank windows
+            const iframe = document.createElement('iframe');
+            iframe.style.position = 'fixed';
+            iframe.style.right = '0';
+            iframe.style.bottom = '0';
+            iframe.style.width = '0';
+            iframe.style.height = '0';
+            iframe.style.border = '0';
+            iframe.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(iframe);
 
-      // INJECT FULL GITHUB MARKDOWN CSS
-      // This is crucial for the "Markdown Preview Enhanced" look the user requested.
-      const cssStyles = `
-        <style>
-          #pdf-export-container {
-             /* Reset */
-             box-sizing: border-box;
-             -webkit-font-smoothing: antialiased;
-          }
-          .markdown-body {
-            box-sizing: border-box;
-            min-width: 200px;
-            max-width: 980px;
-            margin: 0 auto;
-            padding: 20mm; /* A4 Margins */
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-            font-size: 14px; /* Standard doc size */
-            line-height: 1.6;
-            word-wrap: break-word;
-          }
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (!iframeDoc || !iframe.contentWindow) {
+                alert('Failed to initialize print frame.');
+                document.body.removeChild(iframe);
+                setIsExportingPdf(false);
+                return;
+            }
 
-          .markdown-body h1 {
-            padding-bottom: 0.3em;
-            font-size: 2em;
-            border-bottom: 1px solid #eaecef;
-            margin-top: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-            line-height: 1.25;
-          }
+            iframeDoc.open();
+            iframeDoc.write(`
+                <!doctype html>
+                <html>
+                    <head>
+                        <meta charset="utf-8" />
+                        <title>${template.name.replace(/\s+/g, '_')}_Report</title>
+                        <style>
+                            @page { size: A4; margin: 0; }
+                            html, body { margin: 0; padding: 0; background: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                            ${markdownStyles}
+                            @media print { body { background: #ffffff; } }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="markdown-body">${htmlContent}</div>
+                    </body>
+                </html>
+            `);
+            iframeDoc.close();
 
-          .markdown-body h2 {
-            padding-bottom: 0.3em;
-            font-size: 1.5em;
-            border-bottom: 1px solid #eaecef;
-            margin-top: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-            line-height: 1.25;
-          }
+            const cleanup = () => {
+                if (document.body.contains(iframe)) {
+                    document.body.removeChild(iframe);
+                }
+                setIsExportingPdf(false);
+                setShowExportModal(false);
+            };
 
-          .markdown-body h3 {
-            font-size: 1.25em;
-            margin-top: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-            line-height: 1.25;
-          }
+            const printFrame = () => {
+                try {
+                    iframe.contentWindow?.focus();
+                    iframe.contentWindow?.print();
+                } catch (e) {
+                    console.error('Print failed', e);
+                    alert('Failed to open print dialog.');
+                    cleanup();
+                }
+            };
 
-          .markdown-body h4 {
-            font-size: 1em;
-            margin-top: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-            line-height: 1.25;
-          }
+            // Ensure resources are ready before printing
+            iframe.onload = () => printFrame();
+            // Fallback in case onload doesn't fire
+            setTimeout(() => printFrame(), 300);
 
-          .markdown-body p {
-            margin-top: 0;
-            margin-bottom: 16px;
-          }
-
-          .markdown-body blockquote {
-            padding: 0 1em;
-            color: #6a737d;
-            border-left: 0.25em solid #dfe2e5;
-            margin: 0 0 16px 0;
-          }
-
-          .markdown-body ul, .markdown-body ol {
-            padding-left: 2em;
-            margin-top: 0;
-            margin-bottom: 16px;
-          }
-
-          /* Tables - GitHub Style */
-          .markdown-body table {
-            border-spacing: 0;
-            border-collapse: collapse;
-            display: table;
-            width: 100%;
-            max-width: 100%;
-            margin-top: 0;
-            margin-bottom: 16px;
-          }
-
-          .markdown-body table tr {
-            background-color: #fff;
-            border-top: 1px solid #c6cbd1;
-          }
-
-          .markdown-body table tr:nth-child(2n) {
-            background-color: #f6f8fa;
-          }
-
-          .markdown-body table th, 
-          .markdown-body table td {
-            padding: 6px 13px;
-            border: 1px solid #dfe2e5;
-          }
-
-          .markdown-body table th {
-            font-weight: 600;
-            background-color: #f6f8fa;
-          }
-
-          .markdown-body code {
-            padding: 0.2em 0.4em;
-            margin: 0;
-            font-size: 85%;
-            background-color: rgba(27,31,35,0.05);
-            border-radius: 3px;
-            font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-          }
-
-          .markdown-body pre {
-            padding: 16px;
-            overflow: auto;
-            font-size: 85%;
-            line-height: 1.45;
-            background-color: #f6f8fa;
-            border-radius: 3px;
-            margin-bottom: 16px;
-          }
-          
-          .markdown-body pre code {
-            background-color: transparent;
-            padding: 0;
-          }
-          
-          .markdown-body hr {
-            height: 0.25em;
-            padding: 0;
-            margin: 24px 0;
-            background-color: #e1e4e8;
-            border: 0;
-          }
-          
-          .markdown-body img {
-            max-width: 100%;
-            box-sizing: content-box;
-            background-color: #fff;
-          }
-        </style>
-      `;
-
-      element.innerHTML = cssStyles + `<div class="markdown-body">${htmlContent}</div>`;
-      
-      // Append to body to ensure visibility for html2canvas
-      document.body.appendChild(element);
-
-      const filename = `${template.name.replace(/\s+/g, '_')}_Report.pdf`;
-
-      // @ts-ignore - html2pdf is loaded via CDN in index.html
-      if (typeof window.html2pdf === 'undefined') {
-          alert('PDF Generator library not loaded. Please refresh.');
-          setIsExportingPdf(false);
-          document.body.removeChild(element);
-          return;
-      }
-
-      const opt = {
-          margin:       0, // We handle margins via CSS padding
-          filename:     filename,
-          image:        { type: 'jpeg', quality: 0.98 },
-          html2canvas:  { 
-            scale: 2, 
-            useCORS: true, 
-            logging: false,
-            // Ensure we capture the full width of our container
-            windowWidth: 1000 
-          },
-          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-
-      try {
-          // @ts-ignore
-          await window.html2pdf().from(element).set(opt).save();
-      } catch (e) {
-          console.error("PDF Export failed", e);
-          alert("Failed to export PDF.");
-      } finally {
-          // Cleanup
-          if (document.body.contains(element)) {
-            document.body.removeChild(element);
-          }
-          setIsExportingPdf(false);
-          setShowExportModal(false);
-      }
+            // Cleanup after printing
+            iframe.contentWindow.onafterprint = () => cleanup();
   };
 
   const handleSaveTemplate = () => {
@@ -618,11 +604,18 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                         className="w-full h-full p-8 font-mono text-sm leading-relaxed text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900 outline-none resize-none placeholder:text-slate-300 dark:placeholder:text-slate-600"
                         placeholder="Start typing your report..."
                      />
-                 ) : (
-                     <div className="p-8 w-full max-w-none">
-                         <div className="whitespace-pre-wrap font-sans text-slate-800 dark:text-slate-200 leading-relaxed">{localContent}</div>
-                     </div>
-                 )}
+                                 ) : (
+                                         <div className="p-0 w-full max-w-none bg-white dark:bg-slate-900">
+                                                 <style>{markdownStyles}</style>
+                                                 {previewHtml ? (
+                                                     <div className="markdown-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                                                 ) : (
+                                                     <div className="p-8 whitespace-pre-wrap font-sans text-slate-800 dark:text-slate-200 leading-relaxed">
+                                                         {localContent}
+                                                     </div>
+                                                 )}
+                                         </div>
+                                 )}
              </div>
           </div>
       </div>

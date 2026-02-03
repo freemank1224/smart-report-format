@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { analyzePdfStructure } from '../services/geminiService';
 import { extractTextFromPdf } from '../utils/fileProcessors';
 import { Template } from '../types';
@@ -16,6 +16,7 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
   const [templateContent, setTemplateContent] = useState(existingTemplate?.content || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -37,6 +38,10 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
       setError(err.message || "Failed to process PDF.");
     } finally {
       setIsProcessing(false);
+      // Allow re-selecting the same file after failure or retry
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -106,7 +111,13 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
                 accept="application/pdf" 
                 className="hidden" 
                 onChange={handleFileUpload}
+                  onClick={(e) => {
+                    const input = e.currentTarget as HTMLInputElement;
+                    input.value = '';
+                    setError(null);
+                  }}
                 disabled={isProcessing}
+                  ref={fileInputRef}
               />
               <div className={`
                 flex items-center gap-3 px-8 py-4 rounded-lg font-medium text-white transition-all shadow-lg shadow-blue-500/20
