@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Template } from '../types';
 import TemplateEditor from './TemplateEditor';
-import { Plus, FileText, ArrowLeft, Search } from 'lucide-react';
+import { Plus, FileText, ArrowLeft, Search, Upload } from 'lucide-react';
 
 interface TemplateSelectorProps {
   templates: Template[];
@@ -14,6 +14,55 @@ interface TemplateSelectorProps {
 const TemplateSelector: React.FC<TemplateSelectorProps> = ({ templates, onSelect, onCreate, onBack, excelFileName }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [search, setSearch] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const markdownInputRef = useRef<HTMLInputElement>(null);
+
+  const extractVariables = (content: string) => {
+    const regex = /\{\{([^}]+)\}\}/g;
+    const matches = new Set<string>();
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      matches.add(match[1]);
+    }
+    return Array.from(matches);
+  };
+
+  const handleMarkdownUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const content = await file.text();
+      if (!content.trim()) {
+        throw new Error('Markdown 文件为空，无法导入模板。');
+      }
+
+      const variables = extractVariables(content);
+      const baseName = file.name.replace(/\.(md|markdown)$/i, '');
+
+      const newTemplate: Template = {
+        id: crypto.randomUUID(),
+        name: baseName || 'Imported Markdown Template',
+        description: `Imported from Markdown (${variables.length} variables)`,
+        content,
+        variables,
+        createdAt: Date.now(),
+      };
+
+      onCreate(newTemplate);
+    } catch (err: any) {
+      setUploadError(err?.message || '导入 Markdown 模板失败。');
+    } finally {
+      setIsUploading(false);
+      if (markdownInputRef.current) {
+        markdownInputRef.current.value = '';
+      }
+    }
+  };
 
   const filteredTemplates = templates.filter(t => 
     t.name.toLowerCase().includes(search.toLowerCase()) || 
@@ -53,15 +102,37 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({ templates, onSelect
               className="pl-10 pr-4 py-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 outline-none w-full md:w-64 transition-colors"
             />
           </div>
-          <button
-            onClick={() => setIsCreating(true)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium shadow-sm transition-all whitespace-nowrap"
-          >
-            <Plus size={18} />
-            New Template
-          </button>
+          <label className="relative">
+            <input
+              ref={markdownInputRef}
+              type="file"
+              accept=".md,.markdown,text/markdown"
+              className="hidden"
+              onChange={handleMarkdownUpload}
+              onClick={(e) => {
+                const input = e.currentTarget as HTMLInputElement;
+                input.value = '';
+                setUploadError(null);
+              }}
+              disabled={isUploading}
+            />
+            <button
+              type="button"
+              onClick={() => markdownInputRef.current?.click()}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium shadow-sm transition-all whitespace-nowrap"
+            >
+              <Upload size={18} />
+              {isUploading ? 'Uploading...' : 'Load Template'}
+            </button>
+          </label>
         </div>
       </div>
+
+      {uploadError && (
+        <div className="text-red-500 bg-red-50 dark:bg-red-900/20 px-4 py-2 rounded-md text-sm border border-red-100 dark:border-red-900">
+          {uploadError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Create New Card */}

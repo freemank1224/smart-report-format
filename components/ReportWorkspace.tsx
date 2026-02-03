@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Template, ExcelData, DocumentMappingResult } from '../types';
-import { ArrowLeft, Download, Search, Edit3, Eye, Save, Table as TableIcon, ChevronUp, ChevronDown, CheckSquare, Plus, Settings, RefreshCw, Link as LinkIcon, FileText, X, Check, Wand2, FileType } from 'lucide-react';
+import { ArrowLeft, Download, Search, Edit3, Eye, Save, Table as TableIcon, ChevronUp, ChevronDown, CheckSquare, Plus, Settings, RefreshCw, Link as LinkIcon, FileText, X, Check, Wand2, FileType, AlertTriangle, XCircle, CheckCircle } from 'lucide-react';
 import { extractTextFromPdf, extractTextFromDocx, extractTextFromPlainText, extractTextFromSpreadsheet } from '../utils/fileProcessors';
 import { suggestVariableMappingsFromDocument } from '../services/geminiService';
 
@@ -59,6 +59,70 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     const autoMapFileRef = useRef<HTMLInputElement>(null);
     const storageKey = `smartdoc_variable_values_${template.id}`;
 
+    const getVariableStatus = (value?: string) => {
+        const trimmed = (value || '').trim();
+        if (!trimmed) return 'missing';
+        if (trimmed.toLowerCase() === 'no data') return 'no-data';
+        return 'filled';
+    };
+
+    const statusCounts = useMemo(() => {
+        const counts = { filled: 0, noData: 0, missing: 0 };
+        detectedVariables.forEach(variable => {
+            const status = getVariableStatus(variableValues[variable]);
+            if (status === 'filled') counts.filled += 1;
+            else if (status === 'no-data') counts.noData += 1;
+            else counts.missing += 1;
+        });
+        return counts;
+    }, [detectedVariables, variableValues]);
+
+    const groupedVariables = useMemo(() => {
+        const sectionMap = new Map<string, string>();
+        const sectionOrder: string[] = [];
+        let currentSection = 'Uncategorized';
+        sectionOrder.push(currentSection);
+
+        const detectedSet = new Set(detectedVariables);
+        const lines = localContent.split('\n');
+        const headingPattern = /^#{2,4}\s+(.+)$/;
+        const varPattern = /\{\{([^}]+)\}\}/g;
+
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+            const headingMatch = line.match(headingPattern);
+            if (headingMatch) {
+                currentSection = headingMatch[1].trim();
+                if (!sectionOrder.includes(currentSection)) {
+                    sectionOrder.push(currentSection);
+                }
+                continue;
+            }
+
+            let match;
+            while ((match = varPattern.exec(line)) !== null) {
+                const variable = match[1];
+                if (detectedSet.has(variable) && !sectionMap.has(variable)) {
+                    sectionMap.set(variable, currentSection);
+                }
+            }
+        }
+
+        const groupMap = new Map<string, string[]>();
+        detectedVariables.forEach(variable => {
+            const section = sectionMap.get(variable) || 'Uncategorized';
+            if (!groupMap.has(section)) {
+                groupMap.set(section, []);
+                if (!sectionOrder.includes(section)) sectionOrder.push(section);
+            }
+            groupMap.get(section)!.push(variable);
+        });
+
+        return sectionOrder
+            .filter(section => groupMap.has(section))
+            .map(section => ({ section, variables: groupMap.get(section)! }));
+    }, [detectedVariables, localContent]);
+
     // --- Markdown Rendering ---
     const markdownStyles = `
         .markdown-body {
@@ -70,7 +134,8 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
             font-size: 14px;
             line-height: 1.7;
-            color: #24292e;
+            color: #000;
+            background-color: #fff;
             word-wrap: break-word;
         }
         .markdown-body h1 {
@@ -81,6 +146,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             margin-bottom: 16px;
             font-weight: 600;
             line-height: 1.25;
+            color: #000;
         }
         .markdown-body h2 {
             padding-bottom: 0;
@@ -90,6 +156,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             margin-bottom: 16px;
             font-weight: 600;
             line-height: 1.25;
+            color: #000;
         }
         .markdown-body h3 {
             font-size: 1.25em;
@@ -97,6 +164,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             margin-bottom: 16px;
             font-weight: 600;
             line-height: 1.25;
+            color: #000;
         }
         .markdown-body h4 {
             font-size: 1em;
@@ -104,10 +172,12 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             margin-bottom: 16px;
             font-weight: 600;
             line-height: 1.25;
+            color: #000;
         }
         .markdown-body p {
             margin-top: 0;
             margin-bottom: 16px;
+            color: #000;
         }
         .markdown-body blockquote {
             padding: 0 1em;
@@ -131,10 +201,10 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
         }
         .markdown-body table tr {
             background-color: #fff;
-            border-top: 1px solid #c6cbd1;
+            border-top: 1px solid #000;
         }
         .markdown-body table tr:nth-child(2n) {
-            background-color: #f6f8fa;
+            background-color: #fff;
         }
         .markdown-body table th, 
         .markdown-body table td {
@@ -143,24 +213,27 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
         }
         .markdown-body table th {
             font-weight: 600;
-            background-color: #f6f8fa;
+            background-color: #fff;
+            color: #000;
         }
         .markdown-body code {
             padding: 0.2em 0.4em;
             margin: 0;
             font-size: 85%;
-            background-color: rgba(27,31,35,0.05);
+            background-color: #fff;
             border-radius: 3px;
             font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+            color: #000;
         }
         .markdown-body pre {
             padding: 16px;
             overflow: auto;
             font-size: 85%;
             line-height: 1.45;
-            background-color: #f6f8fa;
+            background-color: #fff;
             border-radius: 3px;
             margin-bottom: 16px;
+            color: #000;
         }
         .markdown-body pre code {
             background-color: transparent;
@@ -170,7 +243,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             height: 0.25em;
             padding: 0;
             margin: 24px 0;
-            background-color: #e1e4e8;
+            background-color: #000;
             border: 0;
         }
         .markdown-body img {
@@ -792,7 +865,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                         placeholder="Start typing your report..."
                      />
                                  ) : (
-                                         <div className="p-0 w-full max-w-none bg-white dark:bg-slate-900">
+                                         <div className="p-0 w-full max-w-none bg-white">
                                                  <style>{markdownStyles}</style>
                                                  {previewHtml ? (
                                                      <div className="markdown-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
@@ -1007,6 +1080,14 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
       {showExportModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-4xl border border-slate-200 dark:border-slate-700 flex flex-col h-[90vh]">
+                                    <style>{`
+                                        @keyframes pulseSoft {
+                                            0% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+                                            50% { box-shadow: 0 0 0 6px rgba(248, 113, 113, 0.25); }
+                                            100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+                                        }
+                                        .pulse-slow { animation: pulseSoft 2.8s ease-in-out infinite; }
+                                    `}</style>
                   <div className="px-8 py-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800 rounded-t-xl">
                       <div>
                           <h3 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -1017,9 +1098,22 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                               We found {detectedVariables.length} remaining placeholders. Fill them in below before generating the report.
                           </p>
                       </div>
-                      <button onClick={() => setShowExportModal(false)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-                          <X size={24}/>
-                      </button>
+                      <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                              <span className="flex items-center gap-1">
+                                  <CheckCircle size={14} className="text-emerald-500" /> {statusCounts.filled}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                  <AlertTriangle size={14} className="text-yellow-500" /> {statusCounts.noData}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                  <XCircle size={14} className="text-rose-500" /> {statusCounts.missing}
+                              </span>
+                          </div>
+                          <button onClick={() => setShowExportModal(false)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                              <X size={24}/>
+                          </button>
+                      </div>
                   </div>
                   
                   <div className="flex-1 overflow-auto p-8 bg-slate-50/30 dark:bg-slate-900/30">
@@ -1035,9 +1129,26 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                               <p>No extra variables found in the document.</p>
                           </div>
                       ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              {detectedVariables.map((variable) => (
-                                  <div key={variable} className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                          <div className="space-y-8">
+                              {groupedVariables.map(group => (
+                                  <div key={group.section}>
+                                      <div className="mb-3 flex items-center gap-2">
+                                          <div className="h-5 w-1.5 rounded-full bg-slate-300 dark:bg-slate-600" />
+                                          <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                                              {group.section}
+                                          </h4>
+                                      </div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                          {group.variables.map((variable) => {
+                                  const status = getVariableStatus(variableValues[variable]);
+                                  const statusClass = status === 'filled'
+                                      ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+                                      : status === 'no-data'
+                                          ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
+                                          : 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 pulse-slow';
+
+                                  return (
+                                  <div key={variable} className={`p-4 rounded-lg border shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all ${statusClass}`}>
                                       <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
                                           {variable}
                                       </label>
@@ -1048,12 +1159,28 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                                           onChange={(e) => setVariableValues({ ...variableValues, [variable]: e.target.value })}
                                           className="w-full text-sm text-slate-800 dark:text-white font-medium placeholder:text-slate-300 dark:placeholder:text-slate-600 outline-none border-b border-transparent focus:border-blue-500 transition-colors bg-transparent"
                                       />
-                                      {(!variableValues[variable]) && (
-                                          <div className="mt-2 text-[10px] text-amber-500 flex items-center gap-1 font-medium">
-                                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block"></span>
-                                              Needs value
+                                      {status === 'missing' && (
+                                          <div className="mt-2 text-[10px] text-rose-500 flex items-center gap-1 font-medium">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block"></span>
+                                              Missing value
                                           </div>
                                       )}
+                                      {status === 'no-data' && (
+                                          <div className="mt-2 text-[10px] text-yellow-600 dark:text-yellow-400 flex items-center gap-1 font-medium">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block"></span>
+                                              Marked as "No data"
+                                          </div>
+                                      )}
+                                      {status === 'filled' && (
+                                          <div className="mt-2 text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                                              Filled
+                                          </div>
+                                      )}
+                                  </div>
+                              );
+                                          })}
+                                      </div>
                                   </div>
                               ))}
                           </div>
