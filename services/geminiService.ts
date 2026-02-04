@@ -45,7 +45,9 @@ const buildAnalyzePrompt = (rawText: string) => `
     (Truncated if too long)
 
     OUTPUT FORMAT:
-    Return ONLY the Markdown text with {{placeholders}}. Do not include introductory text or JSON wrapping.
+    Return ONLY the Markdown text with {{placeholders}}.
+    Do NOT wrap the output in code fences or language identifiers (no triple backticks, no markdown code fences).
+    Do not include introductory text or JSON wrapping.
   `;
 
 const buildMappingPrompt = (params: {
