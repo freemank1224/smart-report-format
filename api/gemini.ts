@@ -99,9 +99,13 @@ A typical MSDS document has this structure - output in THIS ORDER:
      **Fax**: {{Fax}}
      **Email**: {{Email}}
 
-7. TABLES:
+7. TABLES (★★ CRITICAL - PRESERVE EXACT COLUMN ORDER ★★):
    - Keep in Markdown table format.
    - For long tables, only show 3-5 example rows.
+   - MUST preserve the EXACT column header order from the original document.
+   - DO NOT rearrange, swap, or reorder any table columns.
+   - The column sequence in output MUST match the source document exactly.
+   - Example: If source has "| A | B | C |" → output MUST be "| A | B | C |", NOT "| B | A | C |"
 
 === FINAL CHECKLIST BEFORE OUTPUT ===
 ✓ Title block is 3 H1 lines at the very top?
@@ -135,6 +139,20 @@ Rules:
 3. Each candidate must include evidence (short snippet) and a confidence score (0~1).
 4. If a variable is not found, return an empty candidates array.
 
+=== CRITICAL RULE FOR TABLE DATA (Composition/Ingredient Tables) ===
+When extracting table data (like ingredient/composition tables), you MUST:
+1. Look at the TEMPLATE to find the EXACT column header order.
+2. The template table headers define the STRICT ORDER of columns.
+3. Extract values following the EXACT SAME ORDER as the template headers.
+4. DO NOT reorder columns based on the source document's order.
+5. The template is the source of truth for column ordering.
+
+Example:
+- If template has headers: | Ingredient | CAS No. | Content |
+- You MUST output values in order: Ingredient, CAS No., Content
+- Even if source document shows: CAS No., Ingredient, Content
+- The output order must match the TEMPLATE, not the source.
+
 Schema:
 {
   "mappings": [
@@ -148,7 +166,7 @@ Schema:
   "notes": ["..."]
 }
 
-Template Content (for context):
+Template Content (for context - USE THIS FOR COLUMN ORDER):
 ${templateContent.substring(0, 12000)}
 
 Variables to map:

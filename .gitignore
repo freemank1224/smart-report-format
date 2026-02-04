@@ -39,3 +39,6 @@ build
 coverage
 *.tsbuildinfo
 .vercel
+
+# Temp files
+.temp/*

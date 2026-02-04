@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Template, ExcelData, DocumentMappingResult } from '../types';
-import { ArrowLeft, Download, Search, Edit3, Eye, Save, Table as TableIcon, ChevronUp, ChevronDown, CheckSquare, Plus, Settings, RefreshCw, Link as LinkIcon, FileText, X, Check, Wand2, FileType, AlertTriangle, XCircle, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Download, Search, Edit3, Eye, Save, Table as TableIcon, ChevronUp, ChevronDown, CheckSquare, Plus, Settings, RefreshCw, Link as LinkIcon, FileText, X, Check, Wand2, FileType, AlertTriangle, XCircle, CheckCircle, GripVertical } from 'lucide-react';
 import { extractTextFromPdf, extractTextFromDocx, extractTextFromPlainText, extractTextFromSpreadsheet } from '../utils/fileProcessors';
 import { suggestVariableMappingsFromDocument } from '../services/geminiService';
 
@@ -14,7 +14,7 @@ interface ReportWorkspaceProps {
 interface TableConfig {
   mode: 'template-driven' | 'manual';
   // Template Driven Mode
-  targetHeaders: string[]; // The headers defined in the PDF template
+  targetHeaders: string[]; // The headers defined in the PDF template (will be reorderable)
   columnMapping: Record<string, string>; // Map TargetHeader -> ExcelHeader
   replaceRange: { start: number; end: number } | null; // Lines in editor to replace
   
@@ -45,6 +45,135 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     selectedColumns: [],
     headerRenames: {}
   });
+  
+  // --- Manual Mode: Ordered Columns State ---
+  const [manualOrderedColumns, setManualOrderedColumns] = useState<string[]>([]);
+  
+  // --- Drag & Drop State for Column Ordering ---
+  const [draggedHeaderIndex, setDraggedHeaderIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [draggedManualIndex, setDraggedManualIndex] = useState<number | null>(null);
+  const [dragOverManualIndex, setDragOverManualIndex] = useState<number | null>(null);
+
+  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
+    setDraggedHeaderIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverIndex(index);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverIndex(null);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    const dragIndex = draggedHeaderIndex;
+    
+    if (dragIndex === null || dragIndex === dropIndex) {
+      setDraggedHeaderIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    setTableConfig(prev => {
+      const newHeaders = [...prev.targetHeaders];
+      const [removed] = newHeaders.splice(dragIndex, 1);
+      newHeaders.splice(dropIndex, 0, removed);
+      return { ...prev, targetHeaders: newHeaders };
+    });
+
+    setDraggedHeaderIndex(null);
+    setDragOverIndex(null);
+  }, [draggedHeaderIndex]);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedHeaderIndex(null);
+    setDragOverIndex(null);
+  }, []);
+
+  // Manual Mode Drag Handlers
+  const handleManualDragStart = useCallback((e: React.DragEvent, index: number) => {
+    setDraggedManualIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+  }, []);
+
+  const handleManualDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverManualIndex(index);
+  }, []);
+
+  const handleManualDragLeave = useCallback(() => {
+    setDragOverManualIndex(null);
+  }, []);
+
+  const handleManualDrop = useCallback((e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    const dragIndex = draggedManualIndex;
+    
+    if (dragIndex === null || dragIndex === dropIndex) {
+      setDraggedManualIndex(null);
+      setDragOverManualIndex(null);
+      return;
+    }
+
+    setManualOrderedColumns(prev => {
+      const newColumns = [...prev];
+      const [removed] = newColumns.splice(dragIndex, 1);
+      newColumns.splice(dropIndex, 0, removed);
+      return newColumns;
+    });
+
+    setDraggedManualIndex(null);
+    setDragOverManualIndex(null);
+  }, [draggedManualIndex]);
+
+  const handleManualDragEnd = useCallback(() => {
+    setDraggedManualIndex(null);
+    setDragOverManualIndex(null);
+  }, []);
+
+  // Add new template column to manual list
+  const handleAddManualColumn = useCallback(() => {
+    // Create a new custom column name
+    let newColumnName = `Column_${manualOrderedColumns.length + 1}`;
+    let counter = 1;
+    while (manualOrderedColumns.includes(newColumnName)) {
+      counter++;
+      newColumnName = `Column_${counter}`;
+    }
+    
+    setManualOrderedColumns(prev => [...prev, newColumnName]);
+    setTableConfig(prev => ({
+      ...prev,
+      targetHeaders: [...prev.targetHeaders, newColumnName],
+      columnMapping: {
+        ...prev.columnMapping,
+        [newColumnName]: gridData.headers[0] || '' // Default to first Excel column
+      }
+    }));
+  }, [gridData.headers, manualOrderedColumns]);
+
+  // Remove template column from manual list
+  const handleRemoveManualColumn = useCallback((column: string) => {
+    setManualOrderedColumns(prev => prev.filter(c => c !== column));
+    setTableConfig(prev => {
+      const newMapping = { ...prev.columnMapping };
+      delete newMapping[column];
+      return {
+        ...prev,
+        targetHeaders: prev.targetHeaders.filter(c => c !== column),
+        columnMapping: newMapping
+      };
+    });
+  }, []);
 
 
     // --- Finalize / Export Config ---
@@ -408,6 +537,8 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
              // Extract clean headers
              headers = line.split('|').map(s => s.trim()).filter(s => s !== '');
              
+             console.log('✅ Found table at line', i, 'with headers:', headers);
+             
              // Find end of this table block
              for (let j = i + 2; j < lines.length; j++) {
                  if (!lines[j].trim().startsWith('|')) {
@@ -424,6 +555,8 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     if (headerLineIdx !== -1) {
         return { headers, startLine: headerLineIdx, endLine: tableEndIdx };
     }
+    
+    console.warn('⚠️ No table found in content. Total lines:', lines.length);
     return null;
   };
 
@@ -462,11 +595,16 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
           return;
       }
 
-      // 1. Detect existing table in template
+      console.log('🔍 Initializing table modal...');
+      console.log('📄 Template content length:', localContent.length);
+      console.log('📄 First 500 chars:', localContent.substring(0, 500));
+      
+      // Always try to detect table in template first
       const existingTable = findTableInContent(localContent);
 
-      if (existingTable) {
-          // MODE: TEMPLATE DRIVEN
+      if (existingTable && existingTable.headers.length > 0) {
+          console.log('✅ Table detected! Headers:', existingTable.headers);
+          // Found table in template - use template-driven mode
           const mapping = smartMapColumns(existingTable.headers, gridData.headers);
           
           setTableConfig({
@@ -477,18 +615,21 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
               selectedColumns: [],
               headerRenames: {}
           });
+          setManualOrderedColumns(existingTable.headers);
       } else {
-          // MODE: MANUAL (Fallback if no table found in template)
-          const initialRenames: Record<string, string> = {};
-          gridData.headers.forEach(h => initialRenames[h] = h);
+          console.error('❌ No table detected in template!');
+          // No table detected - show warning and use manual mode
+          console.warn('No table detected in template. User will need to manually configure columns.');
+          
           setTableConfig({
               mode: 'manual',
               targetHeaders: [],
               columnMapping: {},
               replaceRange: null,
-              selectedColumns: gridData.headers,
-              headerRenames: initialRenames
+              selectedColumns: [],
+              headerRenames: {}
           });
+          setManualOrderedColumns([]);
       }
 
       setShowTableModal(true);
@@ -499,7 +640,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     
     // Sort rows by index
     const sortedIndices = Array.from(selectedRowIndices).sort((a, b) => a - b);
-    const { replaceRange, mode, targetHeaders, columnMapping, selectedColumns, headerRenames } = tableConfig;
+    const { replaceRange, mode, targetHeaders, columnMapping } = tableConfig;
 
     if (mode === 'template-driven') {
         // Construct table based on TEMPLATE headers
@@ -517,13 +658,16 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
         markdownTable = `${headerRow}\n${separatorRow}\n${dataRows.join('\n')}`;
 
     } else {
-        // Manual Construction
-        const cols = selectedColumns;
-        const headerRow = `| ${cols.map(c => headerRenames[c] || c).join(' | ')} |`;
-        const separatorRow = `| ${cols.map(() => '---').join(' | ')} |`;
+        // Manual Construction - use template headers (manualOrderedColumns) and map to Excel columns
+        const templateHeaders = manualOrderedColumns;
+        const headerRow = `| ${templateHeaders.join(' | ')} |`;
+        const separatorRow = `| ${templateHeaders.map(() => '---').join(' | ')} |`;
         const dataRows = sortedIndices.map(idx => {
             const rowData = gridData.rows[idx];
-            return `| ${cols.map(c => rowData[c] || '').join(' | ')} |`;
+            return `| ${templateHeaders.map(templateH => {
+                const excelCol = columnMapping[templateH];
+                return excelCol ? (rowData[excelCol] || '') : '';
+            }).join(' | ')} |`;
         });
         markdownTable = `${headerRow}\n${separatorRow}\n${dataRows.join('\n')}`;
     }
@@ -1090,18 +1234,47 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                   
                   <div className="flex-1 overflow-auto p-6 bg-slate-50/50 dark:bg-slate-900/50">
                       {tableConfig.mode === 'template-driven' ? (
-                        /* Template Driven UI */
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">
-                                <div>Template Column (Fixed)</div>
-                                <div>Excel Source Column (Select)</div>
+                        /* Template Driven UI with Drag & Drop Reordering */
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between mb-2 px-2">
+                                <div className="grid grid-cols-2 gap-4 text-xs font-bold text-slate-400 uppercase tracking-wider flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-8"></span>
+                                        Template Column
+                                    </div>
+                                    <div>Excel Source Column</div>
+                                </div>
                             </div>
+                            <p className="text-xs text-blue-600 dark:text-blue-400 px-2 mb-3 flex items-center gap-1">
+                                <GripVertical size={14}/>
+                                拖动左侧手柄调整列顺序，确保与模板原文表头顺序一致
+                            </p>
                             
                             {tableConfig.targetHeaders.map((targetH, idx) => (
-                                <div key={idx} className="grid grid-cols-2 gap-4 items-center bg-white dark:bg-slate-700 p-3 rounded-lg border border-slate-200 dark:border-slate-600 shadow-sm">
+                                <div 
+                                    key={targetH}
+                                    onDragOver={(e) => handleDragOver(e, idx)}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={(e) => handleDrop(e, idx)}
+                                    className={`grid grid-cols-2 gap-4 items-center bg-white dark:bg-slate-700 p-3 rounded-lg border shadow-sm transition-all ${
+                                        dragOverIndex === idx 
+                                            ? 'border-blue-500 border-2 bg-blue-50 dark:bg-blue-900/20 scale-[1.02]' 
+                                            : draggedHeaderIndex === idx 
+                                                ? 'border-blue-400 opacity-50 scale-95' 
+                                                : 'border-slate-200 dark:border-slate-600'
+                                    }`}
+                                >
                                     <div className="flex items-center gap-2 font-mono text-sm font-semibold text-slate-700 dark:text-slate-200">
-                                        <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-600 flex items-center justify-center text-xs text-slate-500 dark:text-slate-300">{idx+1}</div>
-                                        {targetH}
+                                        <div 
+                                            draggable
+                                            onDragStart={(e) => handleDragStart(e, idx)}
+                                            onDragEnd={handleDragEnd}
+                                            className="flex items-center gap-1 cursor-grab active:cursor-grabbing p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
+                                        >
+                                            <GripVertical size={18} className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"/>
+                                            <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-xs font-bold text-blue-600 dark:text-blue-300">{idx+1}</div>
+                                        </div>
+                                        <span className="truncate">{targetH}</span>
                                     </div>
                                     <div className="relative">
                                         <select
@@ -1124,37 +1297,127 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                             ))}
                         </div>
                       ) : (
-                         /* Manual UI (Fallback) */
+                         /* Manual UI - Template Columns mapped to Excel Columns */
                          <div className="space-y-4">
-                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Select Columns</p>
-                            {gridData.headers.map(header => (
-                              <div key={header} className="grid grid-cols-12 gap-4 items-center bg-white dark:bg-slate-700 p-3 rounded-lg border border-slate-200 dark:border-slate-600">
-                                  <div className="col-span-1 flex justify-center">
-                                      <input 
-                                        type="checkbox"
-                                        checked={tableConfig.selectedColumns.includes(header)}
-                                        onChange={(e) => {
-                                            const selected = e.target.checked 
-                                                ? [...tableConfig.selectedColumns, header]
-                                                : tableConfig.selectedColumns.filter(c => c !== header);
-                                            setTableConfig({...tableConfig, selectedColumns: selected});
-                                        }}
-                                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-                                      />
-                                  </div>
-                                  <div className="col-span-5 text-sm text-slate-600 dark:text-slate-300 font-mono truncate" title={header}>{header}</div>
-                                  <div className="col-span-6">
-                                      <input 
-                                        type="text" 
-                                        value={tableConfig.headerRenames[header]}
-                                        onChange={(e) => setTableConfig({...tableConfig, headerRenames: { ...tableConfig.headerRenames, [header]: e.target.value }})}
-                                        disabled={!tableConfig.selectedColumns.includes(header)}
-                                        className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded text-sm outline-none disabled:bg-slate-100 dark:disabled:bg-slate-800/50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white placeholder-slate-400"
-                                        placeholder="Rename Header..."
-                                      />
-                                  </div>
-                              </div>
-                            ))}
+                            <div className="flex items-center justify-between mb-2">
+                                <div>
+                                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">自定义报告表格列</p>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">左侧为报告中的列名，右侧选择对应的Excel数据列</p>
+                                </div>
+                                <button
+                                    onClick={handleAddManualColumn}
+                                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800 rounded-lg text-xs font-bold transition-all"
+                                >
+                                    <Plus size={14} />
+                                    添加列
+                                </button>
+                            </div>
+                            <p className="text-xs text-blue-600 dark:text-blue-400 mb-3 flex items-center gap-1">
+                                <GripVertical size={14}/>
+                                拖动手柄调整列顺序，修改列名，选择Excel数据源列
+                            </p>
+                            
+                            <div className="space-y-2">
+                                {manualOrderedColumns.map((templateColumn, idx) => (
+                                    <div 
+                                        key={`${templateColumn}-${idx}`}
+                                        onDragOver={(e) => handleManualDragOver(e, idx)}
+                                        onDragLeave={handleManualDragLeave}
+                                        onDrop={(e) => handleManualDrop(e, idx)}
+                                        className={`flex items-center gap-2 bg-white dark:bg-slate-700 p-3 rounded-lg border shadow-sm transition-all ${
+                                            dragOverManualIndex === idx 
+                                                ? 'border-blue-500 border-2 bg-blue-50 dark:bg-blue-900/20 scale-[1.02]' 
+                                                : draggedManualIndex === idx 
+                                                    ? 'border-blue-400 opacity-50 scale-95' 
+                                                    : 'border-slate-200 dark:border-slate-600'
+                                        }`}
+                                    >
+                                        {/* Drag Handle */}
+                                        <div 
+                                            draggable
+                                            onDragStart={(e) => handleManualDragStart(e, idx)}
+                                            onDragEnd={handleManualDragEnd}
+                                            className="flex items-center gap-1 cursor-grab active:cursor-grabbing p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors shrink-0"
+                                        >
+                                            <GripVertical size={18} className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"/>
+                                            <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-xs font-bold text-blue-600 dark:text-blue-300">{idx+1}</div>
+                                        </div>
+                                        
+                                        {/* Template Column Name (Editable) */}
+                                        <input 
+                                            type="text" 
+                                            value={templateColumn}
+                                            onChange={(e) => {
+                                                const newName = e.target.value;
+                                                setManualOrderedColumns(prev => {
+                                                    const updated = [...prev];
+                                                    updated[idx] = newName;
+                                                    return updated;
+                                                });
+                                                setTableConfig(prev => {
+                                                    const newTargetHeaders = [...prev.targetHeaders];
+                                                    newTargetHeaders[idx] = newName;
+                                                    const newMapping = { ...prev.columnMapping };
+                                                    // Transfer mapping from old name to new name
+                                                    if (newMapping[templateColumn] !== undefined) {
+                                                        newMapping[newName] = newMapping[templateColumn];
+                                                        delete newMapping[templateColumn];
+                                                    }
+                                                    return {
+                                                        ...prev,
+                                                        targetHeaders: newTargetHeaders,
+                                                        columnMapping: newMapping
+                                                    };
+                                                });
+                                            }}
+                                            className="flex-1 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-slate-800 dark:text-white placeholder-slate-400 font-semibold"
+                                            placeholder="报告中的列名..."
+                                        />
+
+                                        {/* Arrow Icon */}
+                                        <div className="text-slate-400 shrink-0">
+                                            <LinkIcon size={16} />
+                                        </div>
+
+                                        {/* Excel Column Selector */}
+                                        <div className="flex-1 relative">
+                                            <select
+                                                value={tableConfig.columnMapping[templateColumn] || ''}
+                                                onChange={(e) => setTableConfig(prev => ({
+                                                    ...prev,
+                                                    columnMapping: {
+                                                        ...prev.columnMapping,
+                                                        [templateColumn]: e.target.value
+                                                    }
+                                                }))}
+                                                className="w-full pl-8 pr-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none appearance-none bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono"
+                                            >
+                                                <option value="">-- 留空 --</option>
+                                                {gridData.headers.map(h => (
+                                                    <option key={h} value={h}>{h}</option>
+                                                ))}
+                                            </select>
+                                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"/>
+                                        </div>
+
+                                        {/* Remove Button */}
+                                        <button
+                                            onClick={() => handleRemoveManualColumn(templateColumn)}
+                                            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors shrink-0"
+                                            title="删除此列"
+                                        >
+                                            <X size={18} />
+                                        </button>
+                                    </div>
+                                ))}
+                                
+                                {manualOrderedColumns.length === 0 && (
+                                    <div className="text-center py-8 text-slate-400 dark:text-slate-500">
+                                        <TableIcon size={32} className="mx-auto mb-2 opacity-50" />
+                                        <p className="text-sm">点击"添加列"开始创建表格</p>
+                                    </div>
+                                )}
+                            </div>
                          </div>
                       )}
                   </div>

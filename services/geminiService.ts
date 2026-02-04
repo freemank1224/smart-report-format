@@ -67,7 +67,7 @@ A typical MSDS document has this structure - output in THIS ORDER:
 
 2. METADATA BLOCK (Report No, Report date, Page):
    - These appear AFTER the title block, BEFORE Section 1.
-   - Each field: bold label + placeholder value.
+   - CRITICAL: ALL values MUST be placeholders - NEVER copy actual values from the document!
    - **Report No**: {{ReportNo}}
    - **Report date**: {{ReportDate}}
    - **Page**: {{CurrentPage}} of {{TotalPages}}
@@ -77,36 +77,69 @@ A typical MSDS document has this structure - output in THIS ORDER:
    - Use ## (H2) for all section titles.
    - Example: ## Section 1-Chemical Product and Company Identification
 
-4. PRODUCT NAME (inside Section 1):
-   - This is a critical field - DO NOT skip it!
-   - Format: **Product Name**: {{ProductName}}
+4. SECTION 1 - CRITICAL VARIABLE RULES:
+   ★★★ EXTREMELY IMPORTANT ★★★
+   ALL user-specific information in Section 1 MUST use variable placeholders!
+   NEVER copy actual values from the source document!
+   
+   Required placeholders in Section 1:
+   - **Product Name**: {{ProductName}}
+   - **Manufacture**: {{Manufacture}}
+   - **Address**: {{Address}}
+   - **Contact Person**: {{ContactPerson}}
+   - **Tel**: {{Tel}}
+   - **Fax**: {{Fax}}
+   - **Email**: {{Email}}
+   - Any other product/company specific information → {{VariableName}}
+   
+   What to keep as-is in Section 1:
+   - Generic instructional text
+   - Field labels (e.g., "Product Name", "Manufacture")
+   - Table headers and structure
 
-5. KEY-VALUE PAIRS (★ MOST IMPORTANT ★):
+5. SECTION 2 AND BEYOND - COPY STRATEGY:
+   ★ From Section 2 onwards, you can copy actual content from the document.
+   - Keep specific hazard descriptions, safety instructions, handling procedures as they appear.
+   - These sections contain standard safety information that doesn't change per product.
+   - Still use placeholders for any product-specific references if they appear.
+
+6. KEY-VALUE PAIRS (★ MOST IMPORTANT ★):
    - For EVERY "Label: Value" line, bold the label.
    - Pattern: "Label: Value" → "**Label**: Value"
    - This applies to ALL sections without exception.
-   - Dynamic values (names, dates, numbers, addresses, emails, phones) → use {{Placeholder}}.
-   - Static instructional text → keep as-is.
+   - Before Section 2: ALL values must be {{Placeholders}}
+   - Section 2 onwards: Use actual values from document (unless product-specific)
 
-6. MANUFACTURER BLOCK (usually after ingredient table):
-   - ALL values must be placeholders:
-     **Manufacture**: {{Manufacture}}
-     **Address**: {{Address}}
-     **Contact Person**: {{ContactPerson}}
-     **Tel**: {{Tel}}
-     **Fax**: {{Fax}}
-     **Email**: {{Email}}
-
-7. TABLES:
-   - Keep in Markdown table format.
-   - For long tables, only show 3-5 example rows.
+7. TABLES - ★★★ CRITICAL ★★★:
+   - ALL tables MUST use standard Markdown format with pipes (|)
+   - Example format:
+     | Column1 | Column2 | Column3 |
+     | --- | --- | --- |
+     | {{Value1}} | {{Value2}} | {{Value3}} |
+   
+   - Section 1 ingredient/composition tables:
+     * Use standard Markdown table format
+     * Headers: exact column names from original table
+     * Data rows: use {{placeholders}} for all values
+     * Example:
+       | NO. | INCI Name | Weight(%) | CAS NO. |
+       | --- | --- | --- | --- |
+       | {{Ingredient1No}} | {{Ingredient1Name}} | {{Ingredient1Weight}} | {{Ingredient1CAS}} |
+   
+   - Section 2+ tables: 
+     * Also use standard Markdown format
+     * Copy actual content from document
 
 === FINAL CHECKLIST BEFORE OUTPUT ===
 ✓ Title block is 3 H1 lines at the very top?
-✓ Metadata (Report No, date, Page) comes AFTER title, BEFORE Section 1?
-✓ Product Name is included in Section 1?
+✓ Metadata (Report No, date, Page) ALL use {{placeholders}}?
+✓ Section 1: ALL product/company info uses {{placeholders}}?
+✓ Product Name is {{ProductName}}, NOT actual product name?
+✓ Manufacture info ALL uses {{placeholders}}, NOT actual company data?
+✓ ALL TABLES use | pipes | in | standard | Markdown | format |?
+✓ Table headers row followed by | --- | --- | separator row?
+✓ Section 2+: Content copied from document (standard safety info)?
 ✓ Every "Label: Value" has bold label?
-✓ All dynamic values use {{Placeholder}}?
 ✓ Document order matches original exactly?
 
 === INPUT TEXT ===
