@@ -74,6 +74,20 @@ const App: React.FC = () => {
     setActiveTemplate(updatedTemplate);
   };
 
+  const handleDeleteTemplate = (id: string) => {
+    setTemplates(prev => prev.filter(t => t.id !== id));
+    if (activeTemplate?.id === id) {
+      setActiveTemplate(null);
+    }
+  };
+
+  const handleRenameTemplate = (id: string, name: string) => {
+    setTemplates(prev => prev.map(t => t.id === id ? { ...t, name } : t));
+    if (activeTemplate?.id === id) {
+      setActiveTemplate(prev => (prev ? { ...prev, name } : prev));
+    }
+  };
+
   const renderStepIndicator = () => {
     const steps = [
       { id: 'upload-data', label: '1. Upload Data', icon: FileSpreadsheet },
@@ -130,6 +144,8 @@ const App: React.FC = () => {
             templates={templates}
             onSelect={handleTemplateSelected}
             onCreate={handleCreateTemplate}
+            onDelete={handleDeleteTemplate}
+            onRename={handleRenameTemplate}
             onBack={() => setView('upload-data')}
             excelFileName={excelData?.fileName}
           />

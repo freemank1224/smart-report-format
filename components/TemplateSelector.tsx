@@ -1,17 +1,19 @@
 import React, { useRef, useState } from 'react';
 import { Template } from '../types';
 import TemplateEditor from './TemplateEditor';
-import { Plus, FileText, ArrowLeft, Search, Upload } from 'lucide-react';
+import { Plus, FileText, ArrowLeft, Search, Upload, Trash2, Edit } from 'lucide-react';
 
 interface TemplateSelectorProps {
   templates: Template[];
   onSelect: (template: Template) => void;
   onCreate: (template: Template) => void;
+  onDelete: (id: string) => void;
+  onRename: (id: string, name: string) => void;
   onBack: () => void;
   excelFileName?: string;
 }
 
-const TemplateSelector: React.FC<TemplateSelectorProps> = ({ templates, onSelect, onCreate, onBack, excelFileName }) => {
+const TemplateSelector: React.FC<TemplateSelectorProps> = ({ templates, onSelect, onCreate, onDelete, onRename, onBack, excelFileName }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [search, setSearch] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -161,6 +163,38 @@ const TemplateSelector: React.FC<TemplateSelectorProps> = ({ templates, onSelect
               <div className="flex justify-between items-start mb-4">
                 <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
                   <FileText size={24} />
+                </div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const nextName = window.prompt('请输入新的模板名称', template.name);
+                      if (nextName && nextName.trim()) {
+                        onRename(template.id, nextName.trim());
+                      }
+                    }}
+                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md transition-colors"
+                    title="Rename"
+                    aria-label="Rename template"
+                  >
+                    <Edit size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const confirmed = window.confirm('确定要删除该模板吗？此操作无法撤销。');
+                      if (confirmed) {
+                        onDelete(template.id);
+                      }
+                    }}
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                    title="Delete"
+                    aria-label="Delete template"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </div>
               <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2 group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors">{template.name}</h3>
