@@ -1,6 +1,29 @@
 import { GoogleGenAI } from "@google/genai";
 import { AnalysisResult, DocumentMappingResult } from "../types";
 
+const useServerless = import.meta.env.PROD || import.meta.env.VITE_USE_SERVERLESS === 'true';
+
+const callServerless = async <T>(body: Record<string, unknown>): Promise<T> => {
+  const response = await fetch('/api/gemini', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    let message = `Serverless 请求失败 (${response.status})`;
+    try {
+      const data = await response.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<T>;
+};
+
 // Lazy initialization to prevent crash when API key is not set
 let ai: GoogleGenAI | null = null;
 
@@ -19,6 +42,13 @@ const getAI = (): GoogleGenAI => {
  * Analyzes raw text from a PDF and converts it into a structured template.
  */
 export const analyzePdfStructure = async (rawText: string): Promise<AnalysisResult> => {
+  if (useServerless) {
+    return callServerless<AnalysisResult>({
+      action: 'analyzePdfStructure',
+      rawText
+    });
+  }
+
   const prompt = `
     You are an expert document parser. Your task is to analyze the following text extracted from a PDF report.
     
@@ -90,6 +120,13 @@ export const suggestVariableMappingsFromDocument = async (params: {
   templateContent: string;
   variables: string[];
 }): Promise<DocumentMappingResult> => {
+  if (useServerless) {
+    return callServerless<DocumentMappingResult>({
+      action: 'suggestVariableMappingsFromDocument',
+      params
+    });
+  }
+
   const { documentText, templateContent, variables } = params;
 
   const prompt = `

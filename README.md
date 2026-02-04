@@ -15,6 +15,14 @@ View your app in AI Studio: https://ai.studio/apps/drive/1eFwGaoQ13gq8UoE_OTb6kY
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. 在本地开发时，在 [.env.local](.env.local) 中设置 `VITE_API_KEY`（用于本地直连 Gemini）
 3. Run the app:
    `npm run dev`
+
+## Deploy to Vercel
+
+在 Vercel 项目设置中添加环境变量：
+
+- `GEMINI_API_KEY`: Gemini API Key（仅在 Serverless Function 中使用）
+
+部署到 Vercel 后，前端会自动通过 Serverless Function 访问 Gemini；本地开发仍然直连 Gemini。
