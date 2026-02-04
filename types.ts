@@ -4,6 +4,7 @@ export interface Template {
   description: string;
   content: string; // The markdown/text content with {{variables}}
   variables: string[]; // List of detected variables
+  defaultValues?: Record<string, string>; // Prefill values extracted from the source report
   createdAt: number;
 }
 

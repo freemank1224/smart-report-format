@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { analyzePdfStructure } from '../services/geminiService';
+import { analyzePdfStructure, suggestVariableMappingsFromDocument } from '../services/geminiService';
 import { extractTextFromPdf } from '../utils/fileProcessors';
 import { Template } from '../types';
 import { Loader2, FileText, Wand2, Save, ArrowLeft } from 'lucide-react';
@@ -17,6 +17,7 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [defaultValues, setDefaultValues] = useState<Record<string, string>>(existingTemplate?.defaultValues || {});
 
   const normalizeReportTitle = (content: string) => {
     const singleLinePattern = /^#\s*\{\{CompanyName\}\}[^\n]*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)[^\n]*$/m;
@@ -51,7 +52,29 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
       
       // 2. AI Analysis
       const result = await analyzePdfStructure(rawText);
-      setTemplateContent(normalizeReportTitle(result.content));
+      const normalizedContent = normalizeReportTitle(result.content);
+      setTemplateContent(normalizedContent);
+
+      const variables = result.detectedVariables?.length
+        ? result.detectedVariables
+        : Array.from(normalizedContent.matchAll(/\{\{([^}]+)\}\}/g)).map(m => m[1]);
+
+      try {
+        const mapping = await suggestVariableMappingsFromDocument({
+          documentText: rawText,
+          templateContent: normalizedContent,
+          variables
+        });
+        const prefill: Record<string, string> = {};
+        mapping.mappings.forEach(m => {
+          const value = m.candidates?.[0]?.value?.trim();
+          if (value) prefill[m.variable] = value;
+        });
+        setDefaultValues(prefill);
+      } catch (mapErr) {
+        console.warn('Failed to prefill variable values from report', mapErr);
+        setDefaultValues({});
+      }
       
       // Move to editor step
       setStep(2);
@@ -86,6 +109,7 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
       description: `Template with ${matches.size} variables`,
       content: templateContent,
       variables: Array.from(matches),
+      defaultValues: defaultValues,
       createdAt: existingTemplate?.createdAt || Date.now(),
     };
 

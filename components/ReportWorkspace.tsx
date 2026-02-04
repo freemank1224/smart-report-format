@@ -626,6 +626,51 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                 }
             });
 
+            // Auto-fill from template default values (Section 2+ only)
+            const defaultValues = template.defaultValues || {};
+            if (Object.keys(defaultValues).length > 0) {
+                const sectionMap = new Map<string, string>();
+                let currentSection = 'Uncategorized';
+                const headingPattern = /^#{2,4}\s+(.+)$/;
+                const varPattern = /\{\{([^}]+)\}\}/g;
+                const lines = localContent.split('\n');
+
+                for (const rawLine of lines) {
+                    const line = rawLine.trim();
+                    const headingMatch = line.match(headingPattern);
+                    if (headingMatch) {
+                        currentSection = headingMatch[1].trim();
+                        continue;
+                    }
+                    let match;
+                    while ((match = varPattern.exec(line)) !== null) {
+                        const variable = match[1];
+                        if (!sectionMap.has(variable)) {
+                            sectionMap.set(variable, currentSection);
+                        }
+                    }
+                }
+
+                const getSectionNumber = (sectionName?: string) => {
+                    if (!sectionName) return null;
+                    const match = sectionName.match(/Section\s+(\d+)/i);
+                    if (!match) return null;
+                    const num = Number.parseInt(match[1], 10);
+                    return Number.isNaN(num) ? null : num;
+                };
+
+                userVars.forEach(variable => {
+                    if (initialValues[variable]) return;
+                    const sectionName = sectionMap.get(variable);
+                    const sectionNumber = getSectionNumber(sectionName);
+                    if (sectionNumber === null || sectionNumber < 2) return;
+                    const fallbackValue = defaultValues[variable];
+                    if (fallbackValue && fallbackValue.trim() !== '') {
+                        initialValues[variable] = fallbackValue;
+                    }
+                });
+            }
+
             setVariableValues(initialValues);
       setAutoMapError(null);
       
