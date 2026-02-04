@@ -50,6 +50,20 @@ const buildAnalyzePrompt = (rawText: string) => `
       "**Pure Admixture**"
     - Use the same formatting rules consistently throughout the entire output. Avoid stylistic variations.
 
+    SECTION HEADING RULES (MUST FOLLOW):
+    - Any line that is a section title (e.g., "Section 1-...", "Section 2-...") MUST be formatted as a Markdown H2 heading using "## ".
+    - Do NOT use H1 for section titles.
+
+    TITLE BLOCK RULES (MUST FOLLOW):
+    - If the document has a three-line title at the very top, you MUST output it as three separate H1 lines, centered.
+    - Line 1 is the company name and MUST be replaced with a placeholder {{CompanyName}}.
+    - Line 2 must be the exact second-line title text extracted from the document.
+    - Line 3 must be the exact third-line title text extracted from the document (e.g., "(MSDS)") and MUST be its own line (not merged with line 2).
+    - Use Markdown H1 headings, one line per heading:
+      # {{CompanyName}}
+      # {Line2TitleFromDocument}
+      # {Line3TitleFromDocument}
+
     CRITICAL RULES FOR TABLES & LISTS:
     - If you encounter a table with many repeated or empty rows (e.g., an Ingredients table with rows 1 to 20), DO NOT generate a placeholder for every single row.
     - ONLY generate the first 3 rows as examples to establish the pattern (e.g., {{Ingredient1_Name}}, {{Ingredient2_Name}}, {{Ingredient3_Name}}).
