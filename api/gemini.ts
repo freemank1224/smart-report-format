@@ -36,6 +36,20 @@ const buildAnalyzePrompt = (rawText: string) => `
     3. Replace these dynamic data points with Handlebars-style placeholders, e.g., {{ClientName}}, {{ReportDate}}, {{TotalRevenue}}.
     4. Keep static boilerplate text (legal disclaimers, standard introductions) as is.
 
+    MARKDOWN CONSISTENCY RULES (MUST FOLLOW):
+    - For any key-value line in the form "Label: Value", ALWAYS bold the label.
+      Example: "Report No: {{ReportNumber}}" -> "**Report No**: {{ReportNumber}}".
+      Example: "Report date: {{ReportDate}}" -> "**Report date**: {{ReportDate}}".
+      Example: "Page: {{PageNumber}} of 7" -> "**Page**: {{PageNumber}} of 7".
+    - If a section heading is followed by a single line that is an entry/item name (not a sentence), make that line bold.
+      Example:
+      "## Section 3-Composition/Information on Ingredient"
+      "Pure Admixture"
+      ->
+      "## Section 3-Composition/Information on Ingredient"
+      "**Pure Admixture**"
+    - Use the same formatting rules consistently throughout the entire output. Avoid stylistic variations.
+
     CRITICAL RULES FOR TABLES & LISTS:
     - If you encounter a table with many repeated or empty rows (e.g., an Ingredients table with rows 1 to 20), DO NOT generate a placeholder for every single row.
     - ONLY generate the first 3 rows as examples to establish the pattern (e.g., {{Ingredient1_Name}}, {{Ingredient2_Name}}, {{Ingredient3_Name}}).
