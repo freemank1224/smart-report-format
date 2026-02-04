@@ -64,12 +64,16 @@ A typical MSDS document has this structure - output in THIS ORDER:
 
 1. TITLE BLOCK:
    - First 3 lines are H1 headings (using #).
-   - Line 1 (company name) → {{CompanyName}}.
+   - ★ CRITICAL: Line 1 (company name) MUST be {{CompanyName}} - NEVER copy the actual company name!
    - Lines 2-3 keep exact text from document.
+   - Example:
+     # {{CompanyName}}
+     # Material Safety Data Sheet
+     # (MSDS)
 
 2. METADATA BLOCK (Report No, Report date, Page):
    - These appear AFTER the title block, BEFORE Section 1.
-   - Each field: bold label + placeholder value.
+   - CRITICAL: ALL values MUST be placeholders - NEVER copy actual values from the document!
    - **Report No**: {{ReportNo}}
    - **Report date**: {{ReportDate}}
    - **Page**: {{CurrentPage}} of {{TotalPages}}
@@ -83,14 +87,40 @@ A typical MSDS document has this structure - output in THIS ORDER:
    - This is a critical field - DO NOT skip it!
    - Format: **Product Name**: {{ProductName}}
 
-5. KEY-VALUE PAIRS (★ MOST IMPORTANT ★):
+5. SECTION 1 - CRITICAL VARIABLE RULES:
+   ★★★ EXTREMELY IMPORTANT ★★★
+   ALL user-specific information in Section 1 MUST use variable placeholders!
+   NEVER copy actual values from the source document!
+   
+   Required placeholders in Section 1:
+   - **Product Name**: {{ProductName}}
+   - **Manufacture**: {{Manufacture}}
+   - **Address**: {{Address}}
+   - **Contact Person**: {{ContactPerson}}
+   - **Tel**: {{Tel}}
+   - **Fax**: {{Fax}}
+   - **Email**: {{Email}}
+   - Any other product/company specific information → {{VariableName}}
+   
+   What to keep as-is in Section 1:
+   - Generic instructional text
+   - Field labels (e.g., "Product Name", "Manufacture")
+   - Table headers and structure
+
+6. SECTION 2 AND BEYOND - COPY STRATEGY:
+   ★ From Section 2 onwards, you can copy actual content from the document.
+   - Keep specific hazard descriptions, safety instructions, handling procedures as they appear.
+   - These sections contain standard safety information that doesn't change per product.
+   - Still use placeholders for any product-specific references if they appear.
+
+7. KEY-VALUE PAIRS (★ MOST IMPORTANT ★):
    - For EVERY "Label: Value" line, bold the label.
    - Pattern: "Label: Value" → "**Label**: Value"
    - This applies to ALL sections without exception.
-   - Dynamic values (names, dates, numbers, addresses, emails, phones) → use {{Placeholder}}.
-   - Static instructional text → keep as-is.
+   - Before Section 2: ALL values must be {{Placeholders}}
+   - Section 2 onwards: Use actual values from document (unless product-specific)
 
-6. MANUFACTURER BLOCK (usually after ingredient table):
+8. MANUFACTURER BLOCK (usually after ingredient table):
    - ALL values must be placeholders:
      **Manufacture**: {{Manufacture}}
      **Address**: {{Address}}
@@ -99,20 +129,37 @@ A typical MSDS document has this structure - output in THIS ORDER:
      **Fax**: {{Fax}}
      **Email**: {{Email}}
 
-7. TABLES (★★ CRITICAL - PRESERVE EXACT COLUMN ORDER ★★):
-   - Keep in Markdown table format.
-   - For long tables, only show 3-5 example rows.
-   - MUST preserve the EXACT column header order from the original document.
-   - DO NOT rearrange, swap, or reorder any table columns.
-   - The column sequence in output MUST match the source document exactly.
-   - Example: If source has "| A | B | C |" → output MUST be "| A | B | C |", NOT "| B | A | C |"
+9. TABLES - ★★★ CRITICAL ★★★:
+   - ALL tables MUST use standard Markdown format with pipes (|)
+   - Example format:
+     | Column1 | Column2 | Column3 |
+     | --- | --- | --- |
+     | {{Value1}} | {{Value2}} | {{Value3}} |
+   
+   - Section 1 ingredient/composition tables:
+     * Use standard Markdown table format
+     * Headers: exact column names from original table
+     * Data rows: use {{placeholders}} for all values
+     * Example:
+       | NO. | INCI Name | Weight(%) | CAS NO. |
+       | --- | --- | --- |
+       | {{Ingredient1No}} | {{Ingredient1Name}} | {{Ingredient1Weight}} | {{Ingredient1CAS}} |
+   
+   - Section 2+ tables: 
+     * Also use standard Markdown format
+     * Copy actual content from document
 
 === FINAL CHECKLIST BEFORE OUTPUT ===
 ✓ Title block is 3 H1 lines at the very top?
-✓ Metadata (Report No, date, Page) comes AFTER title, BEFORE Section 1?
-✓ Product Name is included in Section 1?
+✓ First line is # {{CompanyName}}, NOT actual company name?
+✓ Metadata (Report No, date, Page) ALL use {{placeholders}}?
+✓ Section 1: ALL product/company info uses {{placeholders}}?
+✓ Product Name is {{ProductName}}, NOT actual product name?
+✓ Manufacture info ALL uses {{placeholders}}, NOT actual company data?
+✓ ALL TABLES use | pipes | in | standard | Markdown | format |?
+✓ Table headers row followed by | --- | --- | separator row?
+✓ Section 2+: Content copied from document (standard safety info)?
 ✓ Every "Label: Value" has bold label?
-✓ All dynamic values use {{Placeholder}}?
 ✓ Document order matches original exactly?
 
 === INPUT TEXT ===
@@ -175,6 +222,56 @@ ${variables.join(', ')}
 Document Text:
 ${documentText.substring(0, 30000)}
 `;
+};
+
+/**
+ * Remove duplicate table headers that may appear as plain text before the actual table
+ * CRITICAL: Only remove LOOSE text that duplicates table headers, NOT the table itself!
+ */
+const removeRedundantTableHeaders = (content: string): string => {
+  const lines = content.split('\n');
+  const result: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    // NEVER touch actual table rows (lines starting with |)
+    if (trimmed.startsWith('|')) {
+      result.push(lines[i]);
+      continue;
+    }
+    
+    // NEVER touch markdown headers, bold text, or empty lines
+    if (trimmed.startsWith('#') || trimmed.startsWith('**') || trimmed === '') {
+      result.push(lines[i]);
+      continue;
+    }
+    
+    // Check if the next line is a proper markdown table row
+    const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
+    const isTableAhead = nextLine.startsWith('|');
+    
+    if (isTableAhead) {
+      // Only remove if this line looks like scattered column names WITHOUT pipes
+      // Example to remove: "Weight NO. INCI Name CAS NO. %" (OCR artifact)
+      // Must NOT contain pipes, must have multiple column-like words
+      const hasMultipleColumnWords = /\b(NO\.?|Weight|INCI|Name|CAS|Ingredient)\b/gi.test(trimmed);
+      const matchCount = (trimmed.match(/\b(NO\.?|Weight|INCI|Name|CAS|Ingredient)\b/gi) || []).length;
+      const wordCount = trimmed.split(/\s+/).length;
+      
+      // Remove only if: contains 2+ column keywords, short (≤8 words), no pipes
+      if (hasMultipleColumnWords && matchCount >= 2 && wordCount <= 8 && !trimmed.includes('|')) {
+        // This is likely a redundant header - skip it
+        continue;
+      }
+    }
+    
+    // Keep everything else
+    result.push(lines[i]);
+  }
+  
+  return result.join('\n');
 };
 
 /**
@@ -327,7 +424,8 @@ export default async function handler(req: any, res: any) {
 
       const content = response.text || "";
       // Apply formatting normalization (CRITICAL: must match local behavior)
-      let normalizedContent = normalizeSectionFormatting(content);
+      let normalizedContent = removeRedundantTableHeaders(content);
+      normalizedContent = normalizeSectionFormatting(normalizedContent);
       normalizedContent = normalizeKeyValueBolding(normalizedContent);
       
       const regex = /\{\{([^}]+)\}\}/g;

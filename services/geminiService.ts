@@ -62,8 +62,12 @@ A typical MSDS document has this structure - output in THIS ORDER:
 
 1. TITLE BLOCK:
    - First 3 lines are H1 headings (using #).
-   - Line 1 (company name) → {{CompanyName}}.
+   - ★ CRITICAL: Line 1 (company name) MUST be {{CompanyName}} - NEVER copy the actual company name!
    - Lines 2-3 keep exact text from document.
+   - Example:
+     # {{CompanyName}}
+     # Material Safety Data Sheet
+     # (MSDS)
 
 2. METADATA BLOCK (Report No, Report date, Page):
    - These appear AFTER the title block, BEFORE Section 1.
@@ -149,6 +153,7 @@ A typical MSDS document has this structure - output in THIS ORDER:
 
 === FINAL CHECKLIST BEFORE OUTPUT ===
 ✓ Title block is 3 H1 lines at the very top?
+✓ First line is # {{CompanyName}}, NOT actual company name?
 ✓ Metadata (Report No, date, Page) ALL use {{placeholders}}?
 ✓ Section 1: ALL product/company info uses {{placeholders}}?
 ✓ Product Name is {{ProductName}}, NOT actual product name?
@@ -309,6 +314,56 @@ const getAI = (): GoogleGenAI => {
     ai = new GoogleGenAI({ apiKey });
   }
   return ai;
+};
+
+/**
+ * Remove duplicate table headers that may appear as plain text before the actual table
+ * CRITICAL: Only remove LOOSE text that duplicates table headers, NOT the table itself!
+ */
+const removeRedundantTableHeaders = (content: string): string => {
+  const lines = content.split('\n');
+  const result: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    // NEVER touch actual table rows (lines starting with |)
+    if (trimmed.startsWith('|')) {
+      result.push(lines[i]);
+      continue;
+    }
+    
+    // NEVER touch markdown headers, bold text, or empty lines
+    if (trimmed.startsWith('#') || trimmed.startsWith('**') || trimmed === '') {
+      result.push(lines[i]);
+      continue;
+    }
+    
+    // Check if the next line is a proper markdown table row
+    const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
+    const isTableAhead = nextLine.startsWith('|');
+    
+    if (isTableAhead) {
+      // Only remove if this line looks like scattered column names WITHOUT pipes
+      // Example to remove: "Weight NO. INCI Name CAS NO. %" (OCR artifact)
+      // Must NOT contain pipes, must have multiple column-like words
+      const hasMultipleColumnWords = /\b(NO\.?|Weight|INCI|Name|CAS|Ingredient)\b/gi.test(trimmed);
+      const matchCount = (trimmed.match(/\b(NO\.?|Weight|INCI|Name|CAS|Ingredient)\b/gi) || []).length;
+      const wordCount = trimmed.split(/\s+/).length;
+      
+      // Remove only if: contains 2+ column keywords, short (≤8 words), no pipes
+      if (hasMultipleColumnWords && matchCount >= 2 && wordCount <= 8 && !trimmed.includes('|')) {
+        // This is likely a redundant header - skip it
+        continue;
+      }
+    }
+    
+    // Keep everything else
+    result.push(lines[i]);
+  }
+  
+  return result.join('\n');
 };
 
 /**
@@ -509,7 +564,8 @@ export const analyzePdfStructure = async (rawText: string): Promise<AnalysisResu
 
     const content = response.text || "";
     // Apply formatting normalization
-    let normalizedContent = normalizeSectionFormatting(content);
+    let normalizedContent = removeRedundantTableHeaders(content);
+    normalizedContent = normalizeSectionFormatting(normalizedContent);
     normalizedContent = normalizeKeyValueBolding(normalizedContent);
     
     // Simple regex to extract variables for convenience
