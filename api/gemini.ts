@@ -178,6 +178,64 @@ ${documentText.substring(0, 30000)}
 };
 
 /**
+ * Post-process to fix section formatting issues
+ * - Ensure section headings are on their own line
+ * - Fix subsection labels (Handling:, Storage:, etc.)
+ * - Preserve proper line breaks
+ */
+const normalizeSectionFormatting = (content: string): string => {
+  const lines = content.split('\n');
+  const result: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    // Check if this is a section heading (## Section N-...)
+    if (/^##\s+Section\s+\d+/.test(trimmed)) {
+      // Check if there's content after the section title on the same line
+      const match = trimmed.match(/^(##\s+Section\s+\d+[^:]+?)(\s+[A-Z][a-z]+:.*)/);
+      if (match) {
+        // Split: section heading + content with subsection label
+        result.push(match[1]); // Section heading only
+        result.push(''); // Blank line
+        
+        // Process the rest (likely "Handling: content...")
+        const rest = match[2].trim();
+        const subMatch = rest.match(/^([A-Z][a-z]+):\s*(.+)/);
+        if (subMatch) {
+          result.push(`**${subMatch[1]}:**`); // Bold subsection label
+          if (subMatch[2]) {
+            result.push(subMatch[2]); // Content
+          }
+        } else {
+          result.push(rest);
+        }
+      } else {
+        result.push(line);
+      }
+      continue;
+    }
+    
+    // Fix standalone subsection labels that aren't bolded
+    if (/^(Handling|Storage|Appearance|Odor|pH|Boiling|Melting|Flash|Vapor|Relative|Solubility|Auto-ignition|Decomposition|Viscosity|Molecular):\s*(.*)/.test(trimmed)) {
+      const subMatch = trimmed.match(/^([A-Za-z\s-]+):\s*(.*)/);
+      if (subMatch && !trimmed.startsWith('**')) {
+        result.push(`**${subMatch[1]}:**`);
+        if (subMatch[2]) {
+          result.push(subMatch[2]);
+        }
+        continue;
+      }
+    }
+    
+    result.push(line);
+  }
+  
+  return result.join('\n');
+};
+
+/**
  * Post-process markdown content to ensure all "Label: Value" lines have bolded labels.
  */
 const normalizeKeyValueBolding = (content: string): string => {
@@ -268,7 +326,10 @@ export default async function handler(req: any, res: any) {
       });
 
       const content = response.text || "";
-      const normalizedContent = normalizeKeyValueBolding(content);
+      // Apply formatting normalization (CRITICAL: must match local behavior)
+      let normalizedContent = normalizeSectionFormatting(content);
+      normalizedContent = normalizeKeyValueBolding(normalizedContent);
+      
       const regex = /\{\{([^}]+)\}\}/g;
       const matches = new Set<string>();
       let match;
