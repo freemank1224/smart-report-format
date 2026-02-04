@@ -26,43 +26,96 @@ const callServerless = async <T>(body: Record<string, unknown>): Promise<T> => {
 };
 
 const buildAnalyzePrompt = (rawText: string) => `
-    You are an expert document parser. Your task is to analyze the following text extracted from a PDF report.
-    
-    GOAL:
-    1. Reconstruct the logical structure of the document (headings, paragraphs, bullet points) into a clean Markdown format.
-    2. Identify parts of the text that look like specific data points (e.g., Names, Dates, Amounts, Project Titles, ID numbers, Statuses) that would likely change in different reports.
-    3. Replace these dynamic data points with Handlebars-style placeholders, e.g., {{ClientName}}, {{ReportDate}}, {{TotalRevenue}}.
-    4. Keep static boilerplate text (legal disclaimers, standard introductions) as is.
+You are an expert document parser. Your task is to analyze the following text extracted from a PDF report and convert it into a clean, well-structured Markdown template.
 
-    SECTION HEADING RULES (MUST FOLLOW):
-    - Any line that is a section title (e.g., "Section 1-...", "Section 2-...") MUST be formatted as a Markdown H2 heading using "## ".
-    - Do NOT use H1 for section titles.
+=== CRITICAL RULE: PRESERVE ORIGINAL DOCUMENT STRUCTURE ===
+You MUST output content in the EXACT SAME ORDER as it appears in the original document.
+DO NOT rearrange, merge, or skip any content blocks.
+The document structure is sacred - preserve it exactly.
 
-    TITLE BLOCK RULES (MUST FOLLOW):
-    - If the document has a three-line title at the very top, you MUST output it as three separate H1 lines, centered.
-    - Line 1 is the company name and MUST be replaced with a placeholder {{CompanyName}}.
-    - Line 2 must be the exact second-line title text extracted from the document.
-    - Line 3 must be the exact third-line title text extracted from the document (e.g., "(MSDS)") and MUST be its own line (not merged with line 2).
-    - Use Markdown H1 headings, one line per heading:
-      # {{CompanyName}}
-      # {Line2TitleFromDocument}
-      # {Line3TitleFromDocument}
+=== DOCUMENT STRUCTURE (TYPICAL MSDS FORMAT) ===
+A typical MSDS document has this structure - output in THIS ORDER:
 
-    CRITICAL RULES FOR TABLES & LISTS:
-    - If you encounter a table with many repeated or empty rows (e.g., an Ingredients table with rows 1 to 20), DO NOT generate a placeholder for every single row.
-    - ONLY generate the first 3 rows as examples to establish the pattern (e.g., {{Ingredient1_Name}}, {{Ingredient2_Name}}, {{Ingredient3_Name}}).
-    - Stop after 3-5 rows. Do not output 20+ rows of placeholders. It is better to be concise.
-    - Do NOT output horizontal rules ("---") outside of Markdown tables. Only use "---" for table header separators.
+1. TITLE BLOCK (3 lines, each as H1):
+   # {{CompanyName}}
+   # Material Safety Data Sheet
+   # (MSDS)
 
-    INPUT TEXT:
-    ${rawText.substring(0, 60000)} 
-    (Truncated if too long)
+2. METADATA BLOCK (immediately after title, BEFORE any Section):
+   **Report No**: {{ReportNo}}
+   **Report date**: {{ReportDate}}
+   **Page**: {{CurrentPage}} of {{TotalPages}}
 
-    OUTPUT FORMAT:
-    Return ONLY the Markdown text with {{placeholders}}.
-    Do NOT wrap the output in code fences or language identifiers (no triple backticks, no markdown code fences).
-    Do not include introductory text or JSON wrapping.
-  `;
+3. SECTIONS (each starts with ## Section N-...):
+   ## Section 1-Chemical Product and Company Identification
+   **Product Name**: {{ProductName}}
+   ... (table and other content)
+   
+   **Manufacture**: {{Manufacture}}
+   **Address**: {{Address}}
+   ... etc.
+   
+   ## Section 2-Hazards Identification
+   ... etc.
+
+=== FORMATTING RULES ===
+
+1. TITLE BLOCK:
+   - First 3 lines are H1 headings (using #).
+   - Line 1 (company name) → {{CompanyName}}.
+   - Lines 2-3 keep exact text from document.
+
+2. METADATA BLOCK (Report No, Report date, Page):
+   - These appear AFTER the title block, BEFORE Section 1.
+   - Each field: bold label + placeholder value.
+   - **Report No**: {{ReportNo}}
+   - **Report date**: {{ReportDate}}
+   - **Page**: {{CurrentPage}} of {{TotalPages}}
+   - DO NOT put these inside Section 1!
+
+3. SECTION HEADINGS:
+   - Use ## (H2) for all section titles.
+   - Example: ## Section 1-Chemical Product and Company Identification
+
+4. PRODUCT NAME (inside Section 1):
+   - This is a critical field - DO NOT skip it!
+   - Format: **Product Name**: {{ProductName}}
+
+5. KEY-VALUE PAIRS (★ MOST IMPORTANT ★):
+   - For EVERY "Label: Value" line, bold the label.
+   - Pattern: "Label: Value" → "**Label**: Value"
+   - This applies to ALL sections without exception.
+   - Dynamic values (names, dates, numbers, addresses, emails, phones) → use {{Placeholder}}.
+   - Static instructional text → keep as-is.
+
+6. MANUFACTURER BLOCK (usually after ingredient table):
+   - ALL values must be placeholders:
+     **Manufacture**: {{Manufacture}}
+     **Address**: {{Address}}
+     **Contact Person**: {{ContactPerson}}
+     **Tel**: {{Tel}}
+     **Fax**: {{Fax}}
+     **Email**: {{Email}}
+
+7. TABLES:
+   - Keep in Markdown table format.
+   - For long tables, only show 3-5 example rows.
+
+=== FINAL CHECKLIST BEFORE OUTPUT ===
+✓ Title block is 3 H1 lines at the very top?
+✓ Metadata (Report No, date, Page) comes AFTER title, BEFORE Section 1?
+✓ Product Name is included in Section 1?
+✓ Every "Label: Value" has bold label?
+✓ All dynamic values use {{Placeholder}}?
+✓ Document order matches original exactly?
+
+=== INPUT TEXT ===
+${rawText.substring(0, 60000)}
+
+=== OUTPUT ===
+Return ONLY the Markdown text with {{placeholders}}.
+Do NOT wrap in code fences. Do NOT include explanations.
+`;
 
 const buildMappingPrompt = (params: {
   documentText: string;
@@ -209,6 +262,85 @@ const getAI = (): GoogleGenAI => {
 };
 
 /**
+ * Post-process markdown content to ensure all "Label: Value" lines have bolded labels.
+ * This fixes inconsistencies where the model may miss bolding some labels.
+ */
+const normalizeKeyValueBolding = (content: string): string => {
+  const lines = content.split('\n');
+  const result: string[] = [];
+  
+  let inTable = false;
+  let inCodeBlock = false;
+  
+  for (const line of lines) {
+    // Track code blocks
+    if (line.trim().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      result.push(line);
+      continue;
+    }
+    
+    // Skip code blocks
+    if (inCodeBlock) {
+      result.push(line);
+      continue;
+    }
+    
+    // Track table state (lines starting with |)
+    if (line.trim().startsWith('|')) {
+      inTable = true;
+      result.push(line);
+      continue;
+    } else if (inTable && line.trim() === '') {
+      inTable = false;
+    }
+    
+    // Skip table lines
+    if (inTable) {
+      result.push(line);
+      continue;
+    }
+    
+    // Skip headings (# or ##)
+    if (line.trim().startsWith('#')) {
+      result.push(line);
+      continue;
+    }
+    
+    // Skip lines that are already properly formatted (**Label**:)
+    if (/^\*\*[^*]+\*\*\s*:/.test(line.trim())) {
+      result.push(line);
+      continue;
+    }
+    
+    // Skip lines with URLs (contain http:// or https://)
+    if (/https?:\/\//.test(line)) {
+      result.push(line);
+      continue;
+    }
+    
+    // Match pattern: "Label: Value" where Label is NOT already bolded
+    // Label should be reasonably short (1-50 chars) and not contain certain chars
+    const match = line.match(/^(\s*)([A-Za-z][A-Za-z0-9\s\-_&,./()]{0,50}?)\s*:\s*(.+)$/);
+    
+    if (match) {
+      const [, indent, label, value] = match;
+      // Only bold if label looks like a field name (not a sentence)
+      // Skip if label contains too many spaces (likely a sentence)
+      const wordCount = label.trim().split(/\s+/).length;
+      if (wordCount <= 5) {
+        result.push(`${indent}**${label.trim()}**: ${value}`);
+        continue;
+      }
+    }
+    
+    result.push(line);
+  }
+  
+  return result.join('\n');
+};
+
+/**
  * Analyzes raw text from a PDF and converts it into a structured template.
  */
 export const analyzePdfStructure = async (rawText: string): Promise<AnalysisResult> => {
@@ -232,15 +364,16 @@ export const analyzePdfStructure = async (rawText: string): Promise<AnalysisResu
       'You are a precise document structuring assistant. You output only Markdown.'
     );
 
+    const normalizedContent = normalizeKeyValueBolding(content);
     const regex = /\{\{([^}]+)\}\}/g;
     const matches = new Set<string>();
     let match;
-    while ((match = regex.exec(content)) !== null) {
+    while ((match = regex.exec(normalizedContent)) !== null) {
       matches.add(match[1]);
     }
 
     return {
-      content,
+      content: normalizedContent,
       detectedVariables: Array.from(matches)
     };
   }
@@ -264,17 +397,18 @@ export const analyzePdfStructure = async (rawText: string): Promise<AnalysisResu
     });
 
     const content = response.text || "";
+    const normalizedContent = normalizeKeyValueBolding(content);
     
     // Simple regex to extract variables for convenience
     const regex = /\{\{([^}]+)\}\}/g;
     const matches = new Set<string>();
     let match;
-    while ((match = regex.exec(content)) !== null) {
+    while ((match = regex.exec(normalizedContent)) !== null) {
       matches.add(match[1]);
     }
 
     return {
-      content,
+      content: normalizedContent,
       detectedVariables: Array.from(matches)
     };
 
