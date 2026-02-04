@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Template, ExcelData, DocumentMappingResult } from '../types';
-import { ArrowLeft, Download, Search, Edit3, Eye, Save, Table as TableIcon, ChevronUp, ChevronDown, CheckSquare, Plus, Settings, RefreshCw, Link as LinkIcon, FileText, X, Check, Wand2, FileType, AlertTriangle, XCircle, CheckCircle, GripVertical } from 'lucide-react';
+import { ArrowLeft, Download, Search, Edit3, Eye, Save, Table as TableIcon, ChevronUp, ChevronDown, CheckSquare, Plus, Settings, RefreshCw, Link as LinkIcon, FileText, X, Check, Wand2, FileType, AlertTriangle, XCircle, CheckCircle, GripVertical, Sparkles } from 'lucide-react';
 import { extractTextFromPdf, extractTextFromDocx, extractTextFromPlainText, extractTextFromSpreadsheet } from '../utils/fileProcessors';
-import { suggestVariableMappingsFromDocument } from '../services/geminiService';
+import { suggestVariableMappingsFromDocument, formatSelectedText } from '../services/geminiService';
 
 interface ReportWorkspaceProps {
   template: Template;
@@ -181,13 +181,16 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
   const [detectedVariables, setDetectedVariables] = useState<string[]>([]);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-    const [isAutoMapping, setIsAutoMapping] = useState(false);
-    const [autoMapError, setAutoMapError] = useState<string | null>(null);
-    const [showAutoMapModal, setShowAutoMapModal] = useState(false);
-    const [autoMapSuggestions, setAutoMapSuggestions] = useState<DocumentMappingResult | null>(null);
-    const [autoMapSelections, setAutoMapSelections] = useState<Record<string, string>>({});
-    const autoMapFileRef = useRef<HTMLInputElement>(null);
-    const storageKey = `smartdoc_variable_values_${template.id}`;
+  const [isAutoMapping, setIsAutoMapping] = useState(false);
+  const [autoMapError, setAutoMapError] = useState<string | null>(null);
+  const [showAutoMapModal, setShowAutoMapModal] = useState(false);
+  const [autoMapSuggestions, setAutoMapSuggestions] = useState<DocumentMappingResult | null>(null);
+  const [autoMapSelections, setAutoMapSelections] = useState<Record<string, string>>({});
+  const autoMapFileRef = useRef<HTMLInputElement>(null);
+  const storageKey = `smartdoc_variable_values_${template.id}`;
+  
+  // Format selected text state
+  const [isFormattingText, setIsFormattingText] = useState(false);
 
 
     const getVariableStatus = (value?: string) => {
@@ -1041,6 +1044,42 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     alert("Template updated successfully.");
   };
 
+  const handleFormatSelectedText = async () => {
+    if (!editorRef.current) return;
+    
+    const textarea = editorRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    
+    if (start === end) {
+      alert("请先选中需要格式化的文本");
+      return;
+    }
+    
+    const selectedText = localContent.substring(start, end);
+    
+    setIsFormattingText(true);
+    try {
+      const formattedText = await formatSelectedText(selectedText, localContent);
+      
+      // Replace selected text with formatted version
+      const newContent = localContent.substring(0, start) + formattedText + localContent.substring(end);
+      setLocalContent(newContent);
+      
+      // Restore cursor position
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.focus();
+          editorRef.current.setSelectionRange(start, start + formattedText.length);
+        }
+      }, 0);
+    } catch (err: any) {
+      alert(`格式化失败: ${err.message || '未知错误'}`);
+    } finally {
+      setIsFormattingText(false);
+    }
+  };
+
   const filteredRows = gridData.rows.map((r, i) => ({...r, _originalIndex: i})).filter(row => {
      if (!dataSearch) return true;
      return Object.values(row).some(val => String(val).toLowerCase().includes(dataSearch.toLowerCase()));
@@ -1093,13 +1132,33 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
                  </div>
 
                  {mode === 'edit' && (
-                     <button 
-                        onClick={initTableModal}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800 rounded-md text-xs font-bold transition-all"
-                     >
-                        <TableIcon size={14} /> 
-                        Insert Rows ({selectedRowIndices.size})
-                     </button>
+                     <div className="flex items-center gap-2">
+                         <button 
+                            onClick={handleFormatSelectedText}
+                            disabled={isFormattingText}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 border border-purple-200 dark:border-purple-800 rounded-md text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="格式化选中的文本（AI智能优化）"
+                         >
+                            {isFormattingText ? (
+                                <>
+                                    <RefreshCw size={14} className="animate-spin" />
+                                    格式化中...
+                                </>
+                            ) : (
+                                <>
+                                    <Sparkles size={14} />
+                                    格式化选中文本
+                                </>
+                            )}
+                         </button>
+                         <button 
+                            onClick={initTableModal}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800 rounded-md text-xs font-bold transition-all"
+                         >
+                            <TableIcon size={14} /> 
+                            Insert Rows ({selectedRowIndices.size})
+                         </button>
+                     </div>
                  )}
              </div>
 

@@ -617,3 +617,81 @@ export const testOpenAICompatibleConnection = async (settings: LLMSettings): Pro
     1
   );
 };
+
+/**
+ * Format selected text to match document standards
+ */
+export const formatSelectedText = async (selectedText: string, documentContext: string): Promise<string> => {
+  const openAISettings = getOpenAISettings();
+  
+  const prompt = `You are a document formatting expert. Format the following text to match MSDS/technical document standards.
+
+FORMATTING REQUIREMENTS:
+1. Section headings: Use ## for main sections (e.g., ## Section 7-Handling and Storage)
+2. Subsection labels: Bold with colon on separate line (e.g., **Handling:**)
+3. Key-value pairs: Bold labels (e.g., **Product Name**: {{Value}})
+4. Tables: Use standard Markdown format with pipes |
+5. Preserve {{placeholders}} exactly as they are
+6. Add proper line breaks between paragraphs
+7. Fix run-on text by adding appropriate breaks
+
+DOCUMENT CONTEXT (for reference):
+${documentContext.substring(0, 2000)}
+
+TEXT TO FORMAT:
+${selectedText}
+
+OUTPUT:
+Return ONLY the formatted text. No explanations, no code fences.`;
+
+  if (openAISettings) {
+    if (useServerless) {
+      const result = await callOpenAICompatibleServerless<{ formatted: string }>({
+        action: 'formatText',
+        text: selectedText,
+        context: documentContext,
+        config: {
+          endpoint: openAISettings.endpoint,
+          model: openAISettings.model,
+          apiKey: openAISettings.apiKey
+        }
+      });
+      return result.formatted;
+    }
+
+    const content = await callOpenAICompatibleDirect(
+      openAISettings,
+      prompt,
+      'You are a precise document formatting assistant.',
+      2000
+    );
+    
+    // Apply post-processing
+    let formatted = normalizeSectionFormatting(content);
+    formatted = normalizeKeyValueBolding(formatted);
+    return formatted;
+  }
+
+  // Fallback to Gemini
+  if (useServerless) {
+    const result = await callServerless<{ formatted: string }>({
+      action: 'formatText',
+      text: selectedText,
+      context: documentContext
+    });
+    return result.formatted;
+  }
+
+  const response = await getAI().models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: prompt,
+    config: {
+      systemInstruction: "You are a precise document formatting assistant.",
+    }
+  });
+
+  let formatted = response.text || selectedText;
+  formatted = normalizeSectionFormatting(formatted);
+  formatted = normalizeKeyValueBolding(formatted);
+  return formatted;
+};
