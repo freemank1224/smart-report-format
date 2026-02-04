@@ -46,6 +46,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     headerRenames: {}
   });
 
+
     // --- Finalize / Export Config ---
   const [showExportModal, setShowExportModal] = useState(false);
   const [detectedVariables, setDetectedVariables] = useState<string[]>([]);
@@ -58,6 +59,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     const [autoMapSelections, setAutoMapSelections] = useState<Record<string, string>>({});
     const autoMapFileRef = useRef<HTMLInputElement>(null);
     const storageKey = `smartdoc_variable_values_${template.id}`;
+
 
     const getVariableStatus = (value?: string) => {
         const trimmed = (value || '').trim();
@@ -122,6 +124,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             .filter(section => groupMap.has(section))
             .map(section => ({ section, variables: groupMap.get(section)! }));
     }, [detectedVariables, localContent]);
+
 
     // --- Markdown Rendering ---
     const markdownStyles = `

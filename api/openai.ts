@@ -1,0 +1,212 @@
+import type { AnalysisResult, DocumentMappingResult } from "../types";
+
+const buildAnalyzePrompt = (rawText: string) => `
+    You are an expert document parser. Your task is to analyze the following text extracted from a PDF report.
+    
+    GOAL:
+    1. Reconstruct the logical structure of the document (headings, paragraphs, bullet points) into a clean Markdown format.
+    2. Identify parts of the text that look like specific data points (e.g., Names, Dates, Amounts, Project Titles, ID numbers, Statuses) that would likely change in different reports.
+    3. Replace these dynamic data points with Handlebars-style placeholders, e.g., {{ClientName}}, {{ReportDate}}, {{TotalRevenue}}.
+    4. Keep static boilerplate text (legal disclaimers, standard introductions) as is.
+
+    CRITICAL RULES FOR TABLES & LISTS:
+    - If you encounter a table with many repeated or empty rows (e.g., an Ingredients table with rows 1 to 20), DO NOT generate a placeholder for every single row.
+    - ONLY generate the first 3 rows as examples to establish the pattern (e.g., {{Ingredient1_Name}}, {{Ingredient2_Name}}, {{Ingredient3_Name}}).
+    - Stop after 3-5 rows. Do not output 20+ rows of placeholders. It is better to be concise.
+    - Do NOT output horizontal rules ("---") outside of Markdown tables. Only use "---" for table header separators.
+
+    INPUT TEXT:
+    ${rawText.substring(0, 30000)} 
+    (Truncated if too long)
+
+    OUTPUT FORMAT:
+    Return ONLY the Markdown text with {{placeholders}}. Do not include introductory text or JSON wrapping.
+  `;
+
+const buildMappingPrompt = (params: {
+  documentText: string;
+  templateContent: string;
+  variables: string[];
+}) => {
+  const { documentText, templateContent, variables } = params;
+  return `
+You are an expert information extraction assistant.
+Your task is to map information from the provided document to the template variables.
+
+Rules:
+1. Return ONLY JSON with the schema below. No extra text.
+2. Provide multiple candidates if the document is ambiguous.
+3. Each candidate must include evidence (short snippet) and a confidence score (0~1).
+4. If a variable is not found, return an empty candidates array.
+
+Schema:
+{
+  "mappings": [
+    {
+      "variable": "VariableName",
+      "candidates": [
+        {"value": "...", "confidence": 0.0, "evidence": "...", "rationale": "..."}
+      ]
+    }
+  ],
+  "notes": ["..."]
+}
+
+Template Content (for context):
+${templateContent.substring(0, 12000)}
+
+Variables to map:
+${variables.join(', ')}
+
+Document Text:
+${documentText.substring(0, 30000)}
+`;
+};
+
+const buildChatCompletionsUrl = (baseUrl: string) => {
+  const trimmed = baseUrl.replace(/\/+$/, '');
+  if (/\/chat\/completions$/i.test(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed.endsWith('/v1')) {
+    return `${trimmed}/chat/completions`;
+  }
+  return `${trimmed}/v1/chat/completions`;
+};
+
+const safeParseJson = (text: string): any => {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const match = trimmed.match(/```json\s*([\s\S]*?)\s*```/i) || trimmed.match(/```\s*([\s\S]*?)\s*```/i);
+    if (match && match[1]) {
+      return JSON.parse(match[1]);
+    }
+  }
+  throw new Error("LLM response is not valid JSON.");
+};
+
+const callOpenAICompatible = async (params: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+  systemInstruction?: string;
+  maxTokens?: number;
+}) => {
+  const response = await fetch(buildChatCompletionsUrl(params.endpoint), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${params.apiKey}`
+    },
+    body: JSON.stringify({
+      model: params.model,
+      messages: [
+        ...(params.systemInstruction ? [{ role: 'system', content: params.systemInstruction }] : []),
+        { role: 'user', content: params.prompt }
+      ],
+      temperature: 0.2,
+      max_tokens: params.maxTokens
+    })
+  });
+
+  if (!response.ok) {
+    let message = `OpenAI 兼容服务请求失败 (${response.status})`;
+    try {
+      const data = await response.json();
+      if (data?.error?.message) message = data.error.message;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+
+  const data = await response.json();
+  return data?.choices?.[0]?.message?.content || '';
+};
+
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  try {
+    const { action, rawText, params, config } = req.body || {};
+    const endpoint = config?.endpoint;
+    const model = config?.model;
+    const apiKey = config?.apiKey;
+
+    if (!endpoint || !model || !apiKey) {
+      res.status(400).json({ error: 'endpoint, model, apiKey are required' });
+      return;
+    }
+
+    if (action === 'testConnection') {
+      await callOpenAICompatible({
+        endpoint,
+        apiKey,
+        model,
+        prompt: 'ping',
+        maxTokens: 1
+      });
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    if (action === 'analyzePdfStructure') {
+      if (typeof rawText !== 'string') {
+        res.status(400).json({ error: 'rawText is required' });
+        return;
+      }
+
+      const content = await callOpenAICompatible({
+        endpoint,
+        apiKey,
+        model,
+        prompt: buildAnalyzePrompt(rawText),
+        systemInstruction: 'You are a precise document structuring assistant. You output only Markdown.'
+      });
+
+      const regex = /\{\{([^}]+)\}\}/g;
+      const matches = new Set<string>();
+      let match;
+      while ((match = regex.exec(content)) !== null) {
+        matches.add(match[1]);
+      }
+
+      const result: AnalysisResult = {
+        content,
+        detectedVariables: Array.from(matches)
+      };
+
+      res.status(200).json(result);
+      return;
+    }
+
+    if (action === 'suggestVariableMappingsFromDocument') {
+      if (!params || typeof params !== 'object') {
+        res.status(400).json({ error: 'params is required' });
+        return;
+      }
+
+      const content = await callOpenAICompatible({
+        endpoint,
+        apiKey,
+        model,
+        prompt: buildMappingPrompt(params),
+        systemInstruction: 'You output ONLY valid JSON.'
+      });
+
+      const parsed = safeParseJson(content) as DocumentMappingResult;
+      res.status(200).json(parsed);
+      return;
+    }
+
+    res.status(400).json({ error: 'Unknown action' });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Failed to call OpenAI compatible service.' });
+  }
+}

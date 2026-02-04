@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import DataUploader from './components/DataUploader';
 import TemplateSelector from './components/TemplateSelector';
 import ReportWorkspace from './components/ReportWorkspace';
+import LlmSettingsPanel from './components/LlmSettingsPanel';
 import { Template, ViewState, ExcelData } from './types';
 import { FileSpreadsheet, FileText, CheckCircle } from 'lucide-react';
 
@@ -143,6 +144,8 @@ const App: React.FC = () => {
           />
         )}
       </main>
+
+      <LlmSettingsPanel />
     </div>
   );
 };

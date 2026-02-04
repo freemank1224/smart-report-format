@@ -37,3 +37,14 @@ export interface DocumentMappingResult {
   mappings: VariableMappingSuggestion[];
   notes?: string[];
 }
+
+export type LLMProvider = 'gemini' | 'openai-compatible';
+
+export interface LLMSettings {
+  provider: LLMProvider;
+  endpoint: string;
+  model: string;
+  apiKey: string;
+  rememberSession: boolean;
+  multimodalConfirmed: boolean;
+}
