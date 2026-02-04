@@ -258,21 +258,39 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     `;
 
     const normalizeReportTitle = (content: string) => {
-        const singleLinePattern = /^#\s*\{\{CompanyName\}\}[^\n]*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)[^\n]*$/m;
-        const twoLinePattern = /^#\s*\{\{CompanyName\}\}\s*\n\s*(?:\*\*|__)?\s*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)\s*(?:\*\*|__)?\s*$/m;
+        const placeholderSingleLine = /^#\s*\{\{CompanyName\}\}[^\n]*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)[^\n]*$/m;
+        const placeholderTwoLine = /^#\s*\{\{CompanyName\}\}\s*\n\s*(?:\*\*|__)?\s*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)\s*(?:\*\*|__)?\s*$/m;
+        const genericSingleLine = /^#\s*(.+?)\s+Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)\s*$/m;
+        const genericTwoLine = /^#\s*(.+?)\s*\n\s*(?:\*\*|__)?\s*Material\s+Safety\s+Data\s+Sheet\s*\(MSDS\)\s*(?:\*\*|__)?\s*$/m;
 
-        const replacement = (
+        const placeholderReplacement = (
             `# {{CompanyName}}\n` +
             `# Material Safety Data Sheet\n` +
             `# (MSDS)`
         );
 
-        if (singleLinePattern.test(content)) {
-            return content.replace(singleLinePattern, replacement);
+        if (placeholderSingleLine.test(content)) {
+            return content.replace(placeholderSingleLine, placeholderReplacement);
         }
 
-        if (twoLinePattern.test(content)) {
-            return content.replace(twoLinePattern, replacement);
+        if (placeholderTwoLine.test(content)) {
+            return content.replace(placeholderTwoLine, placeholderReplacement);
+        }
+
+        if (genericSingleLine.test(content)) {
+            return content.replace(genericSingleLine, (_, company) => (
+                `# ${company.trim()}\n` +
+                `# Material Safety Data Sheet\n` +
+                `# (MSDS)`
+            ));
+        }
+
+        if (genericTwoLine.test(content)) {
+            return content.replace(genericTwoLine, (_, company) => (
+                `# ${company.trim()}\n` +
+                `# Material Safety Data Sheet\n` +
+                `# (MSDS)`
+            ));
         }
 
         return content;
@@ -567,6 +585,44 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
             } catch (e) {
                 console.warn('Failed to restore variable values', e);
             }
+
+            // Auto-fill from Excel key-value pairs if available
+            const normalizeKey = (value: string) =>
+                value.toLowerCase().replace(/[\s_\-:：()（）]/g, '');
+
+            const excelKeyValues = data.keyValues || {};
+            const keyLookup = new Map<string, string>();
+            Object.entries(excelKeyValues).forEach(([k, v]) => {
+                const normalized = normalizeKey(k);
+                if (!keyLookup.has(normalized)) {
+                    keyLookup.set(normalized, v);
+                }
+            });
+
+            const variableAliases: Record<string, string[]> = {
+                ProductName: ['产品名称', '产品名', '商品名称', '品名', 'Product Name', 'ProductName'],
+                CompanyName: ['公司名称', '企业名称', '生产商', '制造商', '供应商', 'Company Name', 'CompanyName'],
+                ClientName: ['客户名称', '客户', '委托单位', 'Client Name', 'ClientName'],
+                ReportDate: ['报告日期', '日期', 'Report Date', 'ReportDate']
+            };
+
+            userVars.forEach(variable => {
+                if (initialValues[variable]) return;
+                const direct = keyLookup.get(normalizeKey(variable));
+                if (direct) {
+                    initialValues[variable] = direct;
+                    return;
+                }
+                const aliases = variableAliases[variable] || [];
+                for (const alias of aliases) {
+                    const candidate = keyLookup.get(normalizeKey(alias));
+                    if (candidate) {
+                        initialValues[variable] = candidate;
+                        break;
+                    }
+                }
+            });
+
             setVariableValues(initialValues);
       setAutoMapError(null);
       

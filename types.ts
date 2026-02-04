@@ -11,6 +11,7 @@ export interface ExcelData {
   fileName: string;
   headers: string[];
   rows: Record<string, any>[];
+  keyValues?: Record<string, string>;
 }
 
 export type ViewState = 'upload-data' | 'select-template' | 'workspace';

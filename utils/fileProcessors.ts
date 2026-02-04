@@ -40,9 +40,42 @@ export const parseExcelFile = async (file: File): Promise<ExcelData> => {
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
         
         if (jsonData.length === 0) {
-          resolve({ fileName: file.name, headers: [], rows: [] });
+          resolve({ fileName: file.name, headers: [], rows: [], keyValues: {} });
           return;
         }
+
+        // --- KEY-VALUE EXTRACTION (e.g., 产品名称: XXX) ---
+        const keyValues: Record<string, string> = {};
+
+        const tryAddKeyValue = (rawKey: any, rawValue: any) => {
+          const key = rawKey !== undefined && rawKey !== null ? String(rawKey).trim() : '';
+          const value = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
+          if (!key || !value) return;
+          if (!keyValues[key]) {
+            keyValues[key] = value;
+          }
+        };
+
+        jsonData.forEach((row) => {
+          if (!row || row.length === 0) return;
+
+          // Pattern 1: two-column key/value
+          if (row.length >= 2) {
+            tryAddKeyValue(row[0], row[1]);
+          }
+
+          // Pattern 2: inline "Key: Value" or "Key：Value"
+          row.forEach((cell: any) => {
+            if (cell === null || cell === undefined) return;
+            const text = String(cell).trim();
+            if (!text) return;
+            const splitIdx = text.search(/[:：]/);
+            if (splitIdx <= 0) return;
+            const key = text.slice(0, splitIdx).trim();
+            const value = text.slice(splitIdx + 1).trim();
+            tryAddKeyValue(key, value);
+          });
+        });
 
         // --- SMART HEADER DETECTION ---
         // Many Excel files have a title in Row 1 (e.g., "Product Spec"), and headers in Row 2 or 3.
@@ -99,7 +132,7 @@ export const parseExcelFile = async (file: File): Promise<ExcelData> => {
         // Filter out completely empty rows that might exist at the bottom
         const cleanRows = rows.filter(row => Object.values(row).some(v => v !== ""));
 
-        resolve({ fileName: file.name, headers, rows: cleanRows });
+        resolve({ fileName: file.name, headers, rows: cleanRows, keyValues });
       } catch (err) {
         reject(err);
       }
