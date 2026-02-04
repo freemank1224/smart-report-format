@@ -17,9 +17,53 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: any) => item.str)
-      .join(' ');
+    const items = textContent.items
+      .map((item: any) => {
+        const [a, b, c, d, e, f] = item.transform || [];
+        return {
+          str: item.str || '',
+          x: typeof e === 'number' ? e : 0,
+          y: typeof f === 'number' ? f : 0
+        };
+      })
+      .filter((item: any) => item.str && String(item.str).trim() !== '');
+
+    // Sort by Y (descending) then X (ascending) to reconstruct lines
+    items.sort((l: any, r: any) => {
+      if (l.y === r.y) return l.x - r.x;
+      return r.y - l.y;
+    });
+
+    const lines: string[] = [];
+    let currentLineY: number | null = null;
+    let currentLineParts: string[] = [];
+
+    const flushLine = () => {
+      if (currentLineParts.length > 0) {
+        lines.push(currentLineParts.join(' ').replace(/\s+/g, ' ').trim());
+        currentLineParts = [];
+      }
+    };
+
+    const lineThreshold = 2.5;
+    for (const item of items) {
+      if (currentLineY === null) {
+        currentLineY = item.y;
+        currentLineParts.push(item.str);
+        continue;
+      }
+
+      if (Math.abs(item.y - currentLineY) > lineThreshold) {
+        flushLine();
+        currentLineY = item.y;
+        currentLineParts.push(item.str);
+      } else {
+        currentLineParts.push(item.str);
+      }
+    }
+    flushLine();
+
+    const pageText = lines.join('\n');
     fullText += `\n\n--- Page ${i} ---\n\n${pageText}`;
   }
 

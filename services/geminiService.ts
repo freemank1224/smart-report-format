@@ -41,7 +41,7 @@ const buildAnalyzePrompt = (rawText: string) => `
     - Do NOT output horizontal rules ("---") outside of Markdown tables. Only use "---" for table header separators.
 
     INPUT TEXT:
-    ${rawText.substring(0, 30000)} 
+    ${rawText.substring(0, 60000)} 
     (Truncated if too long)
 
     OUTPUT FORMAT:
