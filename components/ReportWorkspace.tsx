@@ -3,6 +3,7 @@ import { Template, ExcelData, DocumentMappingResult } from '../types';
 import { ArrowLeft, Download, Search, Edit3, Eye, Save, Table as TableIcon, ChevronUp, ChevronDown, CheckSquare, Plus, Settings, RefreshCw, Link as LinkIcon, FileText, X, Check, Wand2, FileType, AlertTriangle, XCircle, CheckCircle, GripVertical, Sparkles } from 'lucide-react';
 import { extractTextFromPdf, extractTextFromDocx, extractTextFromPlainText, extractTextFromSpreadsheet } from '../utils/fileProcessors';
 import { suggestVariableMappingsFromDocument, formatSelectedText } from '../services/geminiService';
+import { marked } from 'marked';
 
 interface ReportWorkspaceProps {
   template: Template;
@@ -488,12 +489,8 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
     };
 
     const previewHtml = useMemo(() => {
-        // @ts-ignore
-        if (typeof window.marked === 'undefined') return null;
-        // @ts-ignore
-        window.marked.setOptions({ breaks: true, gfm: true });
-        // @ts-ignore
-        return window.marked.parse(normalizeInlineFields(normalizeSectionBullets(normalizeReportTitle(localContent))));
+        marked.setOptions({ breaks: true, gfm: true });
+        return marked.parse(normalizeInlineFields(normalizeSectionBullets(normalizeReportTitle(localContent))));
     }, [localContent]);
 
   // --- Helpers ---
@@ -961,19 +958,9 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
       setIsExportingPdf(true);
       const finalContent = getProcessedContent();
 
-            // Check if marked is available
-            // @ts-ignore
-            if (typeof window.marked === 'undefined') {
-                alert('Markdown parser not loaded. Please refresh the page.');
-                setIsExportingPdf(false);
-                return;
-            }
-
-            // Parse Markdown to HTML
-            // @ts-ignore
-            window.marked.setOptions({ breaks: true, gfm: true });
-            // @ts-ignore
-            const htmlContent = window.marked.parse(finalContent);
+            // Parse Markdown to HTML using local marked library
+            marked.setOptions({ breaks: true, gfm: true });
+            const htmlContent = marked.parse(finalContent);
 
             // Use a hidden iframe to avoid popup issues and blank windows
             const iframe = document.createElement('iframe');
