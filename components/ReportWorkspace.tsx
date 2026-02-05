@@ -537,8 +537,12 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
          // Check for separator row
          if (nextLine.startsWith('|') && nextLine.includes('---') && nextLine.endsWith('|')) {
              headerLineIdx = i;
-             // Extract clean headers
-             headers = line.split('|').map(s => s.trim()).filter(s => s !== '');
+             // Extract clean headers - preserve empty column names
+             const parts = line.split('|').map(s => s.trim());
+             // Remove only the first and last empty strings (caused by leading/trailing |)
+             if (parts.length > 0 && parts[0] === '') parts.shift();
+             if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+             headers = parts;
              
              console.log('✅ Found table at line', i, 'with headers:', headers);
              
@@ -921,7 +925,7 @@ const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({ template, data, onUpd
       
       // 1. Replace User Variables
       detectedVariables.forEach(v => {
-          const val = variableValues[v] || 'No data';
+          const val = variableValues[v] || '';
           content = content.split(`{{${v}}}`).join(val);
       });
 
