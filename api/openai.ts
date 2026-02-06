@@ -573,6 +573,17 @@ const callOpenAICompatible = async (params: {
 };
 
 export default async function handler(req: any, res: any) {
+  // Enable CORS for all origins (or restrict to your domain in production)
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -580,11 +591,13 @@ export default async function handler(req: any, res: any) {
 
   try {
     const { action, rawText, params, config } = req.body || {};
+    console.log(`🔍 OpenAI serverless handler called with action: ${action}`);
     const endpoint = config?.endpoint;
     const model = config?.model;
     const apiKey = config?.apiKey;
 
     if (!endpoint || !model || !apiKey) {
+      console.error('❌ Missing required config:', { endpoint: !!endpoint, model: !!model, apiKey: !!apiKey });
       res.status(400).json({ error: 'endpoint, model, apiKey are required' });
       return;
     }
@@ -606,12 +619,14 @@ export default async function handler(req: any, res: any) {
       const { pageImages } = req.body;
       
       if (!pageImages || !Array.isArray(pageImages)) {
+        console.error('❌ Missing pageImages in request body');
         res.status(400).json({ 
           error: 'pageImages array is required. Client should render PDF pages and send as base64 images.' 
         });
         return;
       }
 
+      console.log(`📄 Received ${pageImages.length} page images`);
       console.log(`🔍 Processing ${pageImages.length} pages with vision model...`);
 
       // For OpenAI-compatible APIs that support vision (like GPT-4V)

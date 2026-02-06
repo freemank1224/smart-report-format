@@ -15,9 +15,17 @@ const callServerless = async <T>(body: Record<string, unknown>): Promise<T> => {
     let message = `Serverless 请求失败 (${response.status})`;
     try {
       const data = await response.json();
+      console.error('❌ Serverless error response:', data);
       if (data?.error) message = data.error;
-    } catch {
-      // ignore
+    } catch (parseError) {
+      // Try to get text if JSON parsing fails
+      try {
+        const text = await response.text();
+        console.error('❌ Serverless error (raw):', text);
+        if (text) message += `: ${text}`;
+      } catch {
+        // ignore
+      }
     }
     throw new Error(message);
   }
@@ -396,9 +404,17 @@ const callOpenAICompatibleServerless = async <T>(body: Record<string, unknown>):
     let message = `OpenAI 兼容服务请求失败 (${response.status})`;
     try {
       const data = await response.json();
+      console.error('❌ OpenAI Serverless error response:', data);
       if (data?.error) message = data.error;
-    } catch {
-      // ignore
+    } catch (parseError) {
+      // Try to get text if JSON parsing fails
+      try {
+        const text = await response.text();
+        console.error('❌ OpenAI Serverless error (raw):', text);
+        if (text) message += `: ${text}`;
+      } catch {
+        // ignore
+      }
     }
     throw new Error(message);
   }

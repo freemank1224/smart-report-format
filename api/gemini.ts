@@ -537,40 +537,42 @@ const normalizeKeyValueBolding = (content: string): string => {
 };
 
 export default async function handler(req: any, res: any) {
+  // Enable CORS for all origins (or restrict to your domain in production)
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
 
   try {
-    const { action, rawText, params, pdfFile, maxPages } = req.body || {};
+    const { action, rawText, params, pageImages, maxPages } = req.body || {};
+
+    console.log(`🔍 Gemini serverless handler called with action: ${action}`);
+    if (pageImages) {
+      console.log(`📄 Received ${pageImages.length} page images`);
+    }
 
     // Vision-based PDF analysis (PRIMARY METHOD)
     if (action === 'analyzePdfWithVision') {
-      if (!pdfFile) {
-        res.status(400).json({ error: 'pdfFile is required (base64 encoded)' });
-        return;
-      }
-
-      console.log('🔍 Starting vision-based PDF analysis...');
-
-      // Convert base64 PDF to Buffer
-      const pdfBuffer = Buffer.from(pdfFile.split(',')[1] || pdfFile, 'base64');
-      
-      // We need to render PDF pages to images on the server side
-      // For Vercel serverless, we'll use a different approach
-      // Option 1: Use pdf-to-img or similar library
-      // Option 2: Accept already-rendered images from client
-      
-      // For now, expect client to send rendered images
-      const { pageImages } = req.body;
-      
+      // Client sends pre-rendered page images (already processed on client side)
       if (!pageImages || !Array.isArray(pageImages)) {
+        console.error('❌ Missing pageImages in request body');
         res.status(400).json({ 
           error: 'pageImages array is required. Client should render PDF pages and send as base64 images.' 
         });
         return;
       }
+
+      console.log('🔍 Starting vision-based PDF analysis...');
 
       console.log(`📄 Processing ${pageImages.length} pages with vision model...`);
 
