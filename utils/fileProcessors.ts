@@ -9,6 +9,62 @@ import { ExcelData } from '../types';
 // We use the .mjs version from esm.sh to match the main library module format.
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://esm.sh/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
+/**
+ * Render PDF page to image for multimodal vision analysis
+ * This is the PRIMARY method for PDF table extraction
+ */
+export const renderPdfPageToImage = async (
+  file: File,
+  pageNum: number = 1,
+  scale: number = 2.0
+): Promise<string> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(pageNum);
+
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  
+  if (!context) {
+    throw new Error('Failed to get canvas context');
+  }
+
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  await page.render({
+    canvasContext: context,
+    viewport: viewport,
+  }).promise;
+
+  // Return base64 encoded PNG
+  return canvas.toDataURL('image/png');
+};
+
+/**
+ * Render all PDF pages to images
+ * Returns array of base64 encoded images
+ */
+export const renderAllPdfPages = async (file: File, maxPages?: number): Promise<string[]> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const totalPages = maxPages ? Math.min(pdf.numPages, maxPages) : pdf.numPages;
+  const images: string[] = [];
+
+  for (let i = 1; i <= totalPages; i++) {
+    const image = await renderPdfPageToImage(file, i);
+    images.push(image);
+  }
+
+  return images;
+};
+
+/**
+ * DEPRECATED: Legacy text extraction method
+ * Use renderAllPdfPages() with vision model instead for better accuracy
+ * Kept only as fallback for non-vision scenarios
+ */
 export const extractTextFromPdf = async (file: File): Promise<string> => {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -22,16 +78,18 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
         const [a, b, c, d, e, f] = item.transform || [];
         return {
           str: item.str || '',
-          x: typeof e === 'number' ? e : 0,
-          y: typeof f === 'number' ? f : 0
+          x: typeof e === 'number' ? Math.round(e * 100) / 100 : 0,
+          y: typeof f === 'number' ? Math.round(f * 100) / 100 : 0
         };
       })
       .filter((item: any) => item.str && String(item.str).trim() !== '');
 
     // Sort by Y (descending) then X (ascending) to reconstruct lines
+    // Use rounded values for stable sorting across environments
     items.sort((l: any, r: any) => {
-      if (l.y === r.y) return l.x - r.x;
-      return r.y - l.y;
+      const yDiff = r.y - l.y;
+      if (Math.abs(yDiff) < 0.1) return l.x - r.x;  // 更小的 epsilon
+      return yDiff;
     });
 
     const lines: string[] = [];
@@ -40,12 +98,17 @@ export const extractTextFromPdf = async (file: File): Promise<string> => {
 
     const flushLine = () => {
       if (currentLineParts.length > 0) {
-        lines.push(currentLineParts.join(' ').replace(/\s+/g, ' ').trim());
+        // 保留更多空格信息以便 LLM 识别表格列
+        lines.push(currentLineParts.join(' ').replace(/\s{2,}/g, ' ').trim());
         currentLineParts = [];
       }
     };
 
-    const lineThreshold = 2.5;
+    // 动态计算行间距阈值（更鲁棒）
+    const yValues = items.map((item: any) => item.y).sort((a: number, b: number) => b - a);
+    const yDiffs = yValues.slice(0, -1).map((y: number, i: number) => Math.abs(y - yValues[i + 1]));
+    const lineThreshold = yDiffs.length > 0 ? Math.max(1.5, Math.min(yDiffs.filter(d => d > 0.1).sort((a, b) => a - b)[0] || 2.5, 3.5)) : 2.5;
+    
     for (const item of items) {
       if (currentLineY === null) {
         currentLineY = item.y;

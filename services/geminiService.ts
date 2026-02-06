@@ -25,8 +25,145 @@ const callServerless = async <T>(body: Record<string, unknown>): Promise<T> => {
   return response.json() as Promise<T>;
 };
 
+/**
+ * Build vision-based analysis prompt for multimodal models
+ * Emphasizes table extraction with watermark/stamp removal
+ */
+const buildVisionAnalyzePrompt = () => `
+You are an expert document parser with ADVANCED VISION capabilities.
+You are analyzing PDF document images to extract structured content.
+
+🎯 CRITICAL MISSION: Extract tables with MAXIMUM ACCURACY + Use {{placeholders}} correctly
+
+=== VISION ADVANTAGES ===
+You can SEE:
+- Table borders, grid lines, and cell boundaries
+- Column alignment and spacing
+- Text formatting (bold, italic, font sizes)
+- Visual layout and structure
+- Watermarks, stamps, and overlays
+
+=== TABLE EXTRACTION RULES ===
+
+1. WATERMARK & STAMP REMOVAL ⚠️ CRITICAL:
+   - IDENTIFY watermarks (semi-transparent text, diagonal logos)
+   - IDENTIFY stamps (red seals, approval marks, date stamps)
+   - EXCLUDE watermark/stamp text from table content
+   - Only extract actual table cell data
+   - If stamp overlays a cell, extract the text UNDER the stamp
+
+2. TABLE STRUCTURE RECOGNITION:
+   - Count columns by SEEING vertical grid lines or alignment
+   - Identify headers by VISUAL formatting (bold, background color)
+   - Detect merged cells by SEEING cells spanning multiple columns
+   - Preserve exact column order as shown visually
+
+3. CELL CONTENT EXTRACTION:
+   - Extract text from each cell EXACTLY as shown
+   - Ignore any overlaid watermarks or stamps
+   - If a cell has multiple lines, preserve line breaks
+   - Empty cells should be marked as empty
+
+4. ROBUSTNESS REQUIREMENTS:
+   - Handle rotated or skewed tables
+   - Process tables with irregular borders
+   - Extract from multi-page tables (treat each page separately)
+   - Maintain accuracy even with low image quality
+
+=== PLACEHOLDER RULES (★★★ CRITICAL ★★★) ===
+
+1. TITLE BLOCK (3 H1 lines):
+   ★ CRITICAL: Line 1 (company name) MUST be {{CompanyName}} - NEVER copy the actual company name!
+   - Lines 2-3 keep exact text from document.
+   - Example:
+     # {{CompanyName}}
+     # Material Safety Data Sheet
+     # (MSDS)
+
+2. METADATA BLOCK (before Section 1):
+   ★ CRITICAL: ALL values MUST be placeholders - NEVER copy actual values from the document!
+   - **Report No**: {{ReportNo}}
+   - **Report date**: {{ReportDate}}
+   - **Page**: {{CurrentPage}} of {{TotalPages}}
+
+3. SECTION 1 - VARIABLE RULES:
+   ★★★ EXTREMELY IMPORTANT ★★★
+   ALL user-specific information in Section 1 MUST use variable placeholders!
+   NEVER copy actual values from Section 1 of the source document!
+   
+   Required placeholders in Section 1:
+   - **Product Name**: {{ProductName}}
+   - **Manufacture**: {{Manufacture}}
+   - **Address**: {{Address}}
+   - **Contact Person**: {{ContactPerson}}
+   - **Tel**: {{Tel}}
+   - **Fax**: {{Fax}}
+   - **Email**: {{Email}}
+   - Any other product/company specific information → {{VariableName}}
+   
+   What to keep as-is in Section 1:
+   - Field labels (e.g., "Product Name", "Manufacture")
+   - Table headers and structure
+   - Generic instructional text
+
+4. SECTION 2 AND BEYOND - COPY STRATEGY:
+   ★ From Section 2 onwards, you MUST copy actual content from the document.
+   - Keep specific hazard descriptions, safety instructions, handling procedures as they appear.
+   - These sections contain standard safety information that doesn't change per product.
+   - Still use placeholders for any product-specific references if they appear.
+
+=== TABLE FORMAT RULES ===
+
+Standard Markdown table format:
+| Column1 | Column2 | Column3 | Column4 |
+| --- | --- | --- | --- |
+| {{Row1Col1}} | {{Row1Col2}} | {{Row1Col3}} | {{Row1Col4}} |
+| {{Row2Col1}} | {{Row2Col2}} | {{Row2Col3}} | {{Row2Col4}} |
+
+CRITICAL RULES:
+- Count columns by VISUAL grid structure
+- ALL data rows must have SAME number of columns as header
+- Section 1 tables: Use {{placeholders}} for ALL data cell values
+- Section 2+ tables: Copy actual values from document
+- NEVER skip columns due to watermarks/stamps
+
+Example for Section 1 ingredient table:
+| NO. | INCI Name | Weight(%) | CAS NO. |
+| --- | --- | --- | --- |
+| {{Ingredient1No}} | {{Ingredient1Name}} | {{Ingredient1Weight}} | {{Ingredient1CAS}} |
+| {{Ingredient2No}} | {{Ingredient2Name}} | {{Ingredient2Weight}} | {{Ingredient2CAS}} |
+
+=== KEY-VALUE PAIRS ===
+- For EVERY "Label: Value" line, bold the label
+- Pattern: "Label: Value" → "**Label**: Value"
+- Section 1: All values must be {{Placeholders}}
+- Section 2+: Use actual values from document
+
+=== FINAL QUALITY CHECKLIST ===
+Before output, verify:
+✓ Title block first line is # {{CompanyName}}, NOT actual company name?
+✓ Metadata (Report No, date, Page) ALL use {{placeholders}}?
+✓ Section 1: ALL product/company info uses {{placeholders}}?
+✓ Product Name is {{ProductName}}, NOT actual product name?
+✓ Manufacture info ALL uses {{placeholders}}, NOT actual company data?
+✓ Contact Person, Tel, Fax, Email in Section 1 ALL use {{placeholders}}?
+✓ All watermarks/stamps excluded from table cells?
+✓ Column count consistent across all rows?
+✓ Visual table structure preserved accurately?
+✓ Section 2+: Content copied from document (standard safety info)?
+✓ Markdown table syntax correct (pipes, separators)?
+
+=== OUTPUT ===
+Return ONLY the Markdown template.
+NO code fences. NO explanations. NO comments.
+Just the clean Markdown with {{placeholders}}.
+`;
+
 const buildAnalyzePrompt = (rawText: string) => `
 You are an expert document parser. Your task is to analyze the following text extracted from a PDF report and convert it into a clean, well-structured Markdown template.
+
+⚠️ DEPRECATED: This text-based method has lower accuracy.
+Prefer using vision-based analysis (analyzePdfWithVision) for better table extraction.
 
 === CRITICAL RULE: PRESERVE ORIGINAL DOCUMENT STRUCTURE ===
 You MUST output content in the EXACT SAME ORDER as it appears in the original document.
@@ -134,9 +271,9 @@ A typical MSDS document has this structure - output in THIS ORDER:
 7. TABLES - ★★★ CRITICAL ★★★:
    - ALL tables MUST use standard Markdown format with pipes (|)
    - Example format:
-     | Column1 | Column2 | Column3 |
-     | --- | --- | --- |
-     | {{Value1}} | {{Value2}} | {{Value3}} |
+     | Column1 | Column2 | Column3 | Colum4 |
+     | --- | --- | --- | --- |
+     | {{Value1}} | {{Value2}} | {{Value3}} | {{Value3}} |
    
    - Section 1 ingredient/composition tables:
      * Use standard Markdown table format
@@ -302,6 +439,51 @@ const callOpenAICompatibleDirect = async (settings: LLMSettings, prompt: string,
   return data?.choices?.[0]?.message?.content || '';
 };
 
+const callOpenAICompatibleVision = async (settings: LLMSettings, textPrompt: string, pageImages: string[], systemInstruction?: string) => {
+  // Build multimodal messages for OpenAI-compatible vision APIs
+  const visionMessages = [
+    ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
+    { 
+      role: 'user', 
+      content: [
+        { type: 'text', text: textPrompt },
+        ...pageImages.map((imgUrl: string) => ({
+          type: 'image_url',
+          image_url: { url: imgUrl }
+        }))
+      ]
+    }
+  ];
+
+  const response = await fetch(buildChatCompletionsUrl(settings.endpoint), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${settings.apiKey}`
+    },
+    body: JSON.stringify({
+      model: settings.model,
+      messages: visionMessages,
+      temperature: 0.1,
+      max_tokens: 4096
+    })
+  });
+
+  if (!response.ok) {
+    let message = `Vision analysis failed (${response.status})`;
+    try {
+      const data = await response.json();
+      if (data?.error?.message) message = data.error.message;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+
+  const data = await response.json();
+  return data?.choices?.[0]?.message?.content || '';
+};
+
 // Lazy initialization to prevent crash when API key is not set
 let ai: GoogleGenAI | null = null;
 
@@ -352,8 +534,11 @@ const removeRedundantTableHeaders = (content: string): string => {
       const matchCount = (trimmed.match(/\b(NO\.?|Weight|INCI|Name|CAS|Ingredient)\b/gi) || []).length;
       const wordCount = trimmed.split(/\s+/).length;
       
-      // Remove only if: contains 2+ column keywords, short (≤8 words), no pipes
-      if (hasMultipleColumnWords && matchCount >= 2 && wordCount <= 8 && !trimmed.includes('|')) {
+      // 更严格的条件：必须是全部大写或包含点号，避免误删数据行
+      const isAllUpperOrPunct = /^[A-Z0-9\s.%():-]+$/.test(trimmed);
+      
+      // Remove only if: contains 2+ column keywords, short (≤8 words), no pipes, AND all uppercase
+      if (hasMultipleColumnWords && matchCount >= 2 && wordCount <= 8 && !trimmed.includes('|') && isAllUpperOrPunct) {
         // This is likely a redundant header - skip it
         continue;
       }
@@ -504,9 +689,194 @@ const normalizeKeyValueBolding = (content: string): string => {
 };
 
 /**
+ * PRIMARY METHOD: Analyze PDF using multimodal vision model
+ * Renders PDF pages to images and uses Gemini vision for accurate table extraction
+ * Handles watermarks, stamps, and complex table structures
+ */
+export const analyzePdfWithVision = async (pdfFile: File, maxPages: number = 10): Promise<AnalysisResult> => {
+  const openAISettings = getOpenAISettings();
+  
+  // For OpenAI-compatible APIs, check if they support vision
+  if (openAISettings) {
+    console.log('🔍 Using OpenAI-compatible vision model...');
+    
+    // Import dynamically to avoid circular dependency
+    const { renderAllPdfPages } = await import('../utils/fileProcessors');
+    
+    // Render PDF pages to images (required for both serverless and direct)
+    console.log('📸 Rendering PDF pages to images...');
+    const pageImages = await renderAllPdfPages(pdfFile, maxPages);
+    
+    if (pageImages.length === 0) {
+      throw new Error('No pages rendered from PDF');
+    }
+
+    console.log(`📄 Rendered ${pageImages.length} pages from PDF`);
+    
+    if (useServerless) {
+      return callOpenAICompatibleServerless<AnalysisResult>({
+        action: 'analyzePdfWithVision',
+        pageImages, // Send rendered images
+        config: {
+          endpoint: openAISettings.endpoint,
+          model: openAISettings.model,
+          apiKey: openAISettings.apiKey
+        }
+      });
+    }
+
+    // Direct OpenAI-compatible vision analysis
+    console.log(`📄 Processing ${pageImages.length} pages with OpenAI-compatible vision model...`);
+
+    const content = await callOpenAICompatibleVision(
+      openAISettings,
+      buildVisionAnalyzePrompt(),
+      pageImages,
+      'You are a precise document structuring assistant with advanced vision capabilities. Focus on accurate table extraction while ignoring watermarks and stamps.'
+    );
+
+    // Apply post-processing
+    let normalizedContent = removeRedundantTableHeaders(content);
+    normalizedContent = normalizeSectionFormatting(normalizedContent);
+    normalizedContent = normalizeKeyValueBolding(normalizedContent);
+
+    // Extract variables
+    const regex = /\{\{([^}]+)\}\}/g;
+    const matches = new Set<string>();
+    let match;
+    while ((match = regex.exec(normalizedContent)) !== null) {
+      matches.add(match[1]);
+    }
+
+    console.log(`✅ OpenAI-compatible vision analysis complete: ${matches.size} variables detected`);
+
+    return {
+      content: normalizedContent,
+      detectedVariables: Array.from(matches)
+    };
+  }
+
+  // Use Gemini Vision (primary method)
+  // Import dynamically to avoid circular dependency
+  const { renderAllPdfPages } = await import('../utils/fileProcessors');
+  
+  // Render PDF pages to images (required for both serverless and direct)
+  console.log('📸 Rendering PDF pages to images...');
+  const pageImages = await renderAllPdfPages(pdfFile, maxPages);
+  
+  if (pageImages.length === 0) {
+    throw new Error('No pages rendered from PDF');
+  }
+
+  console.log(`📄 Rendered ${pageImages.length} pages from PDF`);
+  
+  if (useServerless) {
+    console.log('🔍 Using Gemini Vision (Serverless)...');
+    return callServerless<AnalysisResult>({
+      action: 'analyzePdfWithVision',
+      pageImages, // Send rendered images
+      maxPages
+    });
+  }
+
+  console.log('🔍 Using Gemini Vision (Direct)...');
+  console.log(`📏 First page image size: ${(pageImages[0].length / 1024).toFixed(0)} KB`);
+
+  // Build multimodal content with images
+  const parts: any[] = [
+    { text: buildVisionAnalyzePrompt() }
+  ];
+
+  // Add each page as an image
+  pageImages.forEach((imageDataUrl, idx) => {
+    // Remove data:image/png;base64, prefix
+    const base64Data = imageDataUrl.split(',')[1];
+    parts.push({
+      inlineData: {
+        mimeType: 'image/png',
+        data: base64Data
+      }
+    });
+  });
+
+  try {
+    const response = await getAI().models.generateContent({
+      model: 'gemini-2.5-flash', // Gemini 2.5 Flash with vision support
+      contents: parts,
+      config: {
+        systemInstruction: "You are a precise document structuring assistant with advanced vision capabilities. Focus on accurate table extraction while ignoring watermarks and stamps.",
+        temperature: 0.1, // Lower temperature for more consistent output
+      }
+    });
+
+    const content = response.text || "";
+    
+    // Apply post-processing
+    let normalizedContent = removeRedundantTableHeaders(content);
+    normalizedContent = normalizeSectionFormatting(normalizedContent);
+    normalizedContent = normalizeKeyValueBolding(normalizedContent);
+
+    // Extract variables
+    const regex = /\{\{([^}]+)\}\}/g;
+    const matches = new Set<string>();
+    let match;
+    while ((match = regex.exec(normalizedContent)) !== null) {
+      matches.add(match[1]);
+    }
+
+    console.log(`✅ Vision analysis complete: ${matches.size} variables detected`);
+
+    return {
+      content: normalizedContent,
+      detectedVariables: Array.from(matches)
+    };
+
+  } catch (error: any) {
+    console.error("Error calling Gemini Vision:", error);
+    
+    // Provide detailed error information
+    let errorMessage = "Failed to analyze PDF with vision model.";
+    
+    if (error?.message) {
+      errorMessage += ` Error: ${error.message}`;
+    }
+    
+    if (error?.status === 404) {
+      errorMessage += " (Model not found - ensure you're using a vision-capable model like gemini-2.5-flash)";
+    } else if (error?.status === 401 || error?.status === 403) {
+      errorMessage += " (Authentication failed - check your API key)";
+    } else if (error?.status === 429) {
+      errorMessage += " (Rate limit exceeded - please try again later)";
+    }
+    
+    console.error('💡 Tip: Make sure VITE_API_KEY is set in your .env.local file');
+    console.error('💡 Get API key from: https://aistudio.google.com/app/apikey');
+    
+    throw new Error(errorMessage);
+  }
+};
+
+/**
+ * Helper: Convert File to base64 string
+ */
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+/**
  * Analyzes raw text from a PDF and converts it into a structured template.
+ * DEPRECATED: Use analyzePdfWithVision for better accuracy
  */
 export const analyzePdfStructure = async (rawText: string): Promise<AnalysisResult> => {
+  console.warn('⚠️ Using legacy text-based analysis. Consider using analyzePdfWithVision for better table accuracy.');
   const openAISettings = getOpenAISettings();
   if (openAISettings) {
     if (useServerless) {
@@ -527,8 +897,9 @@ export const analyzePdfStructure = async (rawText: string): Promise<AnalysisResu
       'You are a precise document structuring assistant. You output only Markdown.'
     );
 
-    // Apply formatting normalization
-    let normalizedContent = normalizeSectionFormatting(content);
+    // Apply formatting normalization (MUST match serverless path)
+    let normalizedContent = removeRedundantTableHeaders(content);
+    normalizedContent = normalizeSectionFormatting(normalizedContent);
     normalizedContent = normalizeKeyValueBolding(normalizedContent);
     
     const regex = /\{\{([^}]+)\}\}/g;
@@ -555,7 +926,7 @@ export const analyzePdfStructure = async (rawText: string): Promise<AnalysisResu
 
   try {
     const response = await getAI().models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: "You are a precise document structuring assistant. You output only Markdown.",
@@ -630,7 +1001,7 @@ export const suggestVariableMappingsFromDocument = async (params: {
 
   try {
     const response = await getAI().models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction: "You output ONLY valid JSON.",
@@ -739,7 +1110,7 @@ Return ONLY the formatted text. No explanations, no code fences.`;
   }
 
   const response = await getAI().models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.5-flash',
     contents: prompt,
     config: {
       systemInstruction: "You are a precise document formatting assistant.",

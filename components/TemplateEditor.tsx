@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { analyzePdfStructure, suggestVariableMappingsFromDocument } from '../services/geminiService';
+import { analyzePdfWithVision, analyzePdfStructure, suggestVariableMappingsFromDocument } from '../services/geminiService';
 import { extractTextFromPdf } from '../utils/fileProcessors';
 import { Template } from '../types';
-import { Loader2, FileText, Wand2, Save, ArrowLeft } from 'lucide-react';
+import { Loader2, FileText, Wand2, Save, ArrowLeft, Eye, AlertCircle } from 'lucide-react';
 
 interface TemplateEditorProps {
   onSave: (template: Template) => void;
@@ -46,12 +46,32 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
 
     setIsProcessing(true);
     setError(null);
+    
     try {
-      // 1. Extract raw text
-      const rawText = await extractTextFromPdf(file);
+      console.log('🚀 Starting multimodal vision-based PDF analysis...');
       
-      // 2. AI Analysis
-      const result = await analyzePdfStructure(rawText);
+      // PRIMARY METHOD: Vision-based analysis
+      let result;
+      let rawText = '';
+      
+      try {
+        // Use vision model for accurate table extraction
+        result = await analyzePdfWithVision(file, 10); // Max 10 pages
+        
+        // Also extract text for variable mapping
+        rawText = await extractTextFromPdf(file);
+        
+        console.log('✅ Vision analysis successful');
+      } catch (visionError) {
+        console.warn('⚠️ Vision analysis failed, falling back to text extraction:', visionError);
+        
+        // FALLBACK: Text-based analysis
+        rawText = await extractTextFromPdf(file);
+        result = await analyzePdfStructure(rawText);
+        
+        setError('使用备用文本模式（表格识别精度可能较低）。建议重试或检查网络连接。');
+      }
+      
       const normalizedContent = normalizeReportTitle(result.content);
       setTemplateContent(normalizedContent);
 
@@ -59,9 +79,10 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
         ? result.detectedVariables
         : Array.from(normalizedContent.matchAll(/\{\{([^}]+)\}\}/g)).map(m => m[1]);
 
+      // Try to prefill variable values
       try {
         const mapping = await suggestVariableMappingsFromDocument({
-          documentText: rawText,
+          documentText: rawText || normalizedContent,
           templateContent: normalizedContent,
           variables
         });
@@ -143,11 +164,32 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
         {step === 1 && (
           <div className="max-w-xl mx-auto flex flex-col items-center justify-center h-full text-center space-y-6">
             <div className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-full">
-              <FileText size={48} className="text-blue-500" />
+              <Eye size={48} className="text-blue-500" />
             </div>
             <div>
-              <h3 className="text-2xl font-semibold text-slate-800 dark:text-white">Upload PDF Report</h3>
-              <p className="text-slate-500 dark:text-slate-400 mt-2">We'll use Gemini AI to extract the structure and identify variables.</p>
+              <h3 className="text-2xl font-semibold text-slate-800 dark:text-white">
+                上传 PDF 报告
+                <span className="ml-2 text-sm px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full">
+                  🤖 多模态视觉识别
+                </span>
+              </h3>
+              <p className="text-slate-500 dark:text-slate-400 mt-2">
+                使用 Gemini Vision AI 精确提取表格结构，自动去除水印和印章
+              </p>
+              <div className="mt-4 text-xs text-slate-400 dark:text-slate-500 space-y-1">
+                <div className="flex items-center justify-center gap-2">
+                  <span>✓</span>
+                  <span>视觉识别表格边框和单元格</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <span>✓</span>
+                  <span>智能去除水印、印章和背景</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <span>✓</span>
+                  <span>准确保持列数和格式</span>
+                </div>
+              </div>
             </div>
             
             <label className="relative cursor-pointer group">
@@ -168,14 +210,15 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({ onSave, onCancel, exist
                 flex items-center gap-3 px-8 py-4 rounded-lg font-medium text-white transition-all shadow-lg shadow-blue-500/20
                 ${isProcessing ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 hover:shadow-blue-500/40'}
               `}>
-                {isProcessing ? <Loader2 className="animate-spin" /> : <Wand2 />}
-                {isProcessing ? 'Analyzing Document...' : 'Select PDF to Analyze'}
+                {isProcessing ? <Loader2 className="animate-spin" /> : <Eye />}
+                {isProcessing ? '🔍 视觉分析中...' : '选择 PDF 开始分析'}
               </div>
             </label>
             
             {error && (
-              <div className="text-red-500 bg-red-50 dark:bg-red-900/20 px-4 py-2 rounded-md text-sm border border-red-100 dark:border-red-900">
-                {error}
+              <div className="flex items-start gap-2 text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 rounded-md text-sm border border-amber-100 dark:border-amber-900">
+                <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                <span>{error}</span>
               </div>
             )}
           </div>

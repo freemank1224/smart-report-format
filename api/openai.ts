@@ -1,5 +1,138 @@
 import type { AnalysisResult, DocumentMappingResult } from "../types";
 
+/**
+ * Build vision-based analysis prompt for multimodal models
+ */
+const buildVisionAnalyzePrompt = () => `
+You are an expert document parser with ADVANCED VISION capabilities.
+You are analyzing PDF document images to extract structured content.
+
+🎯 CRITICAL MISSION: Extract tables with MAXIMUM ACCURACY + Use {{placeholders}} correctly
+
+=== VISION ADVANTAGES ===
+You can SEE:
+- Table borders, grid lines, and cell boundaries
+- Column alignment and spacing
+- Text formatting (bold, italic, font sizes)
+- Visual layout and structure
+- Watermarks, stamps, and overlays
+
+=== TABLE EXTRACTION RULES ===
+
+1. WATERMARK & STAMP REMOVAL ⚠️ CRITICAL:
+   - IDENTIFY watermarks (semi-transparent text, diagonal logos)
+   - IDENTIFY stamps (red seals, approval marks, date stamps)
+   - EXCLUDE watermark/stamp text from table content
+   - Only extract actual table cell data
+   - If stamp overlays a cell, extract the text UNDER the stamp
+
+2. TABLE STRUCTURE RECOGNITION:
+   - Count columns by SEEING vertical grid lines or alignment
+   - Identify headers by VISUAL formatting (bold, background color)
+   - Detect merged cells by SEEING cells spanning multiple columns
+   - Preserve exact column order as shown visually
+
+3. CELL CONTENT EXTRACTION:
+   - Extract text from each cell EXACTLY as shown
+   - Ignore any overlaid watermarks or stamps
+   - If a cell has multiple lines, preserve line breaks
+   - Empty cells should be marked as empty
+
+4. ROBUSTNESS REQUIREMENTS:
+   - Handle rotated or skewed tables
+   - Process tables with irregular borders
+   - Extract from multi-page tables (treat each page separately)
+   - Maintain accuracy even with low image quality
+
+=== PLACEHOLDER RULES (★★★ CRITICAL ★★★) ===
+
+1. TITLE BLOCK (3 H1 lines):
+   ★ CRITICAL: Line 1 (company name) MUST be {{CompanyName}} - NEVER copy the actual company name!
+   - Lines 2-3 keep exact text from document.
+   - Example:
+     # {{CompanyName}}
+     # Material Safety Data Sheet
+     # (MSDS)
+
+2. METADATA BLOCK (before Section 1):
+   ★ CRITICAL: ALL values MUST be placeholders - NEVER copy actual values from the document!
+   - **Report No**: {{ReportNo}}
+   - **Report date**: {{ReportDate}}
+   - **Page**: {{CurrentPage}} of {{TotalPages}}
+
+3. SECTION 1 - VARIABLE RULES:
+   ★★★ EXTREMELY IMPORTANT ★★★
+   ALL user-specific information in Section 1 MUST use variable placeholders!
+   NEVER copy actual values from Section 1 of the source document!
+   
+   Required placeholders in Section 1:
+   - **Product Name**: {{ProductName}}
+   - **Manufacture**: {{Manufacture}}
+   - **Address**: {{Address}}
+   - **Contact Person**: {{ContactPerson}}
+   - **Tel**: {{Tel}}
+   - **Fax**: {{Fax}}
+   - **Email**: {{Email}}
+   - Any other product/company specific information → {{VariableName}}
+   
+   What to keep as-is in Section 1:
+   - Field labels (e.g., "Product Name", "Manufacture")
+   - Table headers and structure
+   - Generic instructional text
+
+4. SECTION 2 AND BEYOND - COPY STRATEGY:
+   ★ From Section 2 onwards, you MUST copy actual content from the document.
+   - Keep specific hazard descriptions, safety instructions, handling procedures as they appear.
+   - These sections contain standard safety information that doesn't change per product.
+   - Still use placeholders for any product-specific references if they appear.
+
+=== TABLE FORMAT RULES ===
+
+Standard Markdown table format:
+| Column1 | Column2 | Column3 | Column4 |
+| --- | --- | --- | --- |
+| {{Row1Col1}} | {{Row1Col2}} | {{Row1Col3}} | {{Row1Col4}} |
+| {{Row2Col1}} | {{Row2Col2}} | {{Row2Col3}} | {{Row2Col4}} |
+
+CRITICAL RULES:
+- Count columns by VISUAL grid structure
+- ALL data rows must have SAME number of columns as header
+- Section 1 tables: Use {{placeholders}} for ALL data cell values
+- Section 2+ tables: Copy actual values from document
+- NEVER skip columns due to watermarks/stamps
+
+Example for Section 1 ingredient table:
+| NO. | INCI Name | Weight(%) | CAS NO. |
+| --- | --- | --- | --- |
+| {{Ingredient1No}} | {{Ingredient1Name}} | {{Ingredient1Weight}} | {{Ingredient1CAS}} |
+| {{Ingredient2No}} | {{Ingredient2Name}} | {{Ingredient2Weight}} | {{Ingredient2CAS}} |
+
+=== KEY-VALUE PAIRS ===
+- For EVERY "Label: Value" line, bold the label
+- Pattern: "Label: Value" → "**Label**: Value"
+- Section 1: All values must be {{Placeholders}}
+- Section 2+: Use actual values from document
+
+=== FINAL QUALITY CHECKLIST ===
+Before output, verify:
+✓ Title block first line is # {{CompanyName}}, NOT actual company name?
+✓ Metadata (Report No, date, Page) ALL use {{placeholders}}?
+✓ Section 1: ALL product/company info uses {{placeholders}}?
+✓ Product Name is {{ProductName}}, NOT actual product name?
+✓ Manufacture info ALL uses {{placeholders}}, NOT actual company data?
+✓ Contact Person, Tel, Fax, Email in Section 1 ALL use {{placeholders}}?
+✓ All watermarks/stamps excluded from table cells?
+✓ Column count consistent across all rows?
+✓ Visual table structure preserved accurately?
+✓ Section 2+: Content copied from document (standard safety info)?
+✓ Markdown table syntax correct (pipes, separators)?
+
+=== OUTPUT ===
+Return ONLY the Markdown template.
+NO code fences. NO explanations. NO comments.
+Just the clean Markdown with {{placeholders}}.
+`;
+
 const buildAnalyzePrompt = (rawText: string) => `
 You are an expert document parser. Your task is to analyze the following text extracted from a PDF report and convert it into a clean, well-structured Markdown template.
 
@@ -233,8 +366,11 @@ const removeRedundantTableHeaders = (content: string): string => {
       const matchCount = (trimmed.match(/\b(NO\.?|Weight|INCI|Name|CAS|Ingredient)\b/gi) || []).length;
       const wordCount = trimmed.split(/\s+/).length;
       
-      // Remove only if: contains 2+ column keywords, short (≤8 words), no pipes
-      if (hasMultipleColumnWords && matchCount >= 2 && wordCount <= 8 && !trimmed.includes('|')) {
+      // 更严格的条件：必须是全部大写或包含点号，避免误删数据行
+      const isAllUpperOrPunct = /^[A-Z0-9\s.%():-]+$/.test(trimmed);
+      
+      // Remove only if: contains 2+ column keywords, short (≤8 words), no pipes, AND all uppercase
+      if (hasMultipleColumnWords && matchCount >= 2 && wordCount <= 8 && !trimmed.includes('|') && isAllUpperOrPunct) {
         // This is likely a redundant header - skip it
         continue;
       }
@@ -462,6 +598,82 @@ export default async function handler(req: any, res: any) {
         maxTokens: 1
       });
       res.status(200).json({ ok: true });
+      return;
+    }
+
+    // Vision-based PDF analysis (if supported by model)
+    if (action === 'analyzePdfWithVision') {
+      const { pageImages } = req.body;
+      
+      if (!pageImages || !Array.isArray(pageImages)) {
+        res.status(400).json({ 
+          error: 'pageImages array is required. Client should render PDF pages and send as base64 images.' 
+        });
+        return;
+      }
+
+      console.log(`🔍 Processing ${pageImages.length} pages with vision model...`);
+
+      // For OpenAI-compatible APIs that support vision (like GPT-4V)
+      // Build multimodal messages
+      const visionMessages = [
+        { role: 'system', content: 'You are a precise document structuring assistant with advanced vision capabilities.' },
+        { 
+          role: 'user', 
+          content: [
+            { type: 'text', text: buildVisionAnalyzePrompt() },
+            ...pageImages.map((imgUrl: string) => ({
+              type: 'image_url',
+              image_url: { url: imgUrl }
+            }))
+          ]
+        }
+      ];
+
+      const response = await fetch(buildChatCompletionsUrl(endpoint), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: visionMessages,
+          temperature: 0.1,
+          max_tokens: 4096
+        })
+      });
+
+      if (!response.ok) {
+        let message = `Vision analysis failed (${response.status})`;
+        try {
+          const data = await response.json();
+          if (data?.error?.message) message = data.error.message;
+        } catch {}
+        throw new Error(message);
+      }
+
+      const data = await response.json();
+      const content = data?.choices?.[0]?.message?.content || '';
+
+      // Apply formatting normalization
+      let normalizedContent = removeRedundantTableHeaders(content);
+      normalizedContent = normalizeSectionFormatting(normalizedContent);
+      normalizedContent = normalizeKeyValueBolding(normalizedContent);
+      
+      const regex = /\{\{([^}]+)\}\}/g;
+      const matches = new Set<string>();
+      let match;
+      while ((match = regex.exec(normalizedContent)) !== null) {
+        matches.add(match[1]);
+      }
+
+      const result: AnalysisResult = {
+        content: normalizedContent,
+        detectedVariables: Array.from(matches)
+      };
+
+      res.status(200).json(result);
       return;
     }
 
